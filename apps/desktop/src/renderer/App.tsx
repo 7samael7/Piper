@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { FolderOpen, GitBranch, Play, RefreshCw, Square, Workflow } from "lucide-react";
-import type { ProviderID, ProviderInfo, RunRecord, RunStartResponse, WorkflowDetails, WorkflowSummary } from "@pipeline-workbench/shared-types";
+import { Download, FolderOpen, GitBranch, Play, RefreshCw, Square, Workflow } from "lucide-react";
+import type { ProviderID, ProviderInfo, RunRecord, RunStartResponse, WorkflowDetails, WorkflowSummary } from "@piper/shared-types";
 import { useEngineEvents } from "./hooks/useEngineEvents";
-import { useWorkbenchStore } from "./store/workbenchStore";
+import { usePiperStore } from "./store/piperStore";
 import { JobInspector } from "./components/JobInspector";
 import { KeyValueEditor, parseKeyValueText } from "./components/KeyValueEditor";
 import { LogTerminal } from "./components/LogTerminal";
@@ -13,18 +13,18 @@ import { WorkflowGraph } from "./components/WorkflowGraph";
 
 export function App() {
   useEngineEvents();
-  const repoPath = useWorkbenchStore((state) => state.repoPath);
-  const selectedProvider = useWorkbenchStore((state) => state.selectedProvider);
-  const selectedWorkflowPath = useWorkbenchStore((state) => state.selectedWorkflowPath);
-  const selectedJobId = useWorkbenchStore((state) => state.selectedJobId);
-  const activeRunId = useWorkbenchStore((state) => state.activeRunId);
-  const runEvents = useWorkbenchStore((state) => state.runEvents);
-  const setRepoPath = useWorkbenchStore((state) => state.setRepoPath);
-  const setSelectedProvider = useWorkbenchStore((state) => state.setSelectedProvider);
-  const setSelectedWorkflowPath = useWorkbenchStore((state) => state.setSelectedWorkflowPath);
-  const setSelectedJobId = useWorkbenchStore((state) => state.setSelectedJobId);
-  const setActiveRunId = useWorkbenchStore((state) => state.setActiveRunId);
-  const clearRunEvents = useWorkbenchStore((state) => state.clearRunEvents);
+  const repoPath = usePiperStore((state) => state.repoPath);
+  const selectedProvider = usePiperStore((state) => state.selectedProvider);
+  const selectedWorkflowPath = usePiperStore((state) => state.selectedWorkflowPath);
+  const selectedJobId = usePiperStore((state) => state.selectedJobId);
+  const activeRunId = usePiperStore((state) => state.activeRunId);
+  const runEvents = usePiperStore((state) => state.runEvents);
+  const setRepoPath = usePiperStore((state) => state.setRepoPath);
+  const setSelectedProvider = usePiperStore((state) => state.setSelectedProvider);
+  const setSelectedWorkflowPath = usePiperStore((state) => state.setSelectedWorkflowPath);
+  const setSelectedJobId = usePiperStore((state) => state.setSelectedJobId);
+  const setActiveRunId = usePiperStore((state) => state.setActiveRunId);
+  const clearRunEvents = usePiperStore((state) => state.clearRunEvents);
 
   const [eventName, setEventName] = useState("workflow_dispatch");
   const [inputsText, setInputsText] = useState("");
@@ -34,14 +34,35 @@ export function App() {
 
   const providersQuery = useQuery({
     queryKey: ["providers"],
-    queryFn: () => window.pipelineWorkbench.request<ProviderInfo[]>("provider.list"),
+    queryFn: () => window.piper.request<ProviderInfo[]>("provider.list"),
+  });
+
+  const appInfoQuery = useQuery({
+    queryKey: ["app-info"],
+    queryFn: () => window.piper.getAppInfo(),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+  const updateQuery = useQuery({
+    queryKey: ["app-update"],
+    queryFn: () => window.piper.checkForUpdates(),
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 15 * 60 * 1000,
+  });
+
+  const openUpdateMutation = useMutation({
+    mutationFn: () => window.piper.openLatestUpdate(),
+    onError: (mutationError) => {
+      setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
+    },
   });
 
   const workflowsQuery = useQuery({
     queryKey: ["workflows", repoPath, selectedProvider],
     enabled: Boolean(repoPath),
     queryFn: () =>
-      window.pipelineWorkbench.request<WorkflowSummary[]>("workflow.discover", {
+      window.piper.request<WorkflowSummary[]>("workflow.discover", {
         repoPath,
         provider: selectedProvider,
       }),
@@ -61,7 +82,7 @@ export function App() {
     queryKey: ["workflow", repoPath, selectedProvider, selectedWorkflowPath],
     enabled: Boolean(repoPath && selectedWorkflowPath),
     queryFn: () =>
-      window.pipelineWorkbench.request<WorkflowDetails>("workflow.get", {
+      window.piper.request<WorkflowDetails>("workflow.get", {
         repoPath,
         workflowPath: selectedWorkflowPath,
         provider: selectedProvider,
@@ -72,7 +93,7 @@ export function App() {
     queryKey: ["history", repoPath],
     enabled: Boolean(repoPath),
     queryFn: () =>
-      window.pipelineWorkbench.request<RunRecord[]>("run.history", {
+      window.piper.request<RunRecord[]>("run.history", {
         repoPath,
         limit: 25,
       }),
@@ -90,7 +111,7 @@ export function App() {
         throw new Error("A repository and workflow are required.");
       }
       clearRunEvents();
-      const response = await window.pipelineWorkbench.request<RunStartResponse>("run.start", {
+      const response = await window.piper.request<RunStartResponse>("run.start", {
         repoPath,
         workflowPath: selectedWorkflowPath,
         provider: selectedProvider,
@@ -113,12 +134,12 @@ export function App() {
       if (!activeRunId) {
         return;
       }
-      await window.pipelineWorkbench.request("run.cancel", { runId: activeRunId });
+      await window.piper.request("run.cancel", { runId: activeRunId });
     },
   });
 
   const openRepository = async () => {
-    const selectedPath = await window.pipelineWorkbench.openRepository();
+    const selectedPath = await window.piper.openRepository();
     if (selectedPath) {
       setError("");
       setRepoPath(selectedPath);
@@ -133,7 +154,7 @@ export function App() {
       <aside className="sidebar">
         <div className="brand-row">
           <GitBranch size={21} />
-          <span>Pipeline Workbench</span>
+          <span>Piper</span>
         </div>
         <button className="primary-button" onClick={openRepository}>
           <FolderOpen size={17} />
@@ -182,12 +203,36 @@ export function App() {
         </section>
 
         <RunHistory runs={historyQuery.data ?? []} />
+        <div className="app-footer">
+          <span>v{appInfoQuery.data?.version ?? "0.1.0"}</span>
+          {updateQuery.data?.status === "available" ? (
+            <button
+              className="update-button"
+              onClick={() => openUpdateMutation.mutate()}
+              disabled={openUpdateMutation.isPending}
+              title={updateQuery.data.message}
+            >
+              <Download size={14} />
+              Install v{updateQuery.data.latestVersion}
+            </button>
+          ) : (
+            <button
+              className="icon-button"
+              onClick={() => void updateQuery.refetch()}
+              disabled={updateQuery.isFetching}
+              title={updateQuery.data?.message ?? "Check for updates"}
+              aria-label="Check for updates"
+            >
+              <RefreshCw className={updateQuery.isFetching ? "spin" : undefined} size={15} />
+            </button>
+          )}
+        </div>
       </aside>
 
       <main className="main-shell">
         <header className="topbar">
           <div>
-            <h1>{selectedWorkflow?.name ?? "Local CI/CD Workbench"}</h1>
+            <h1>{selectedWorkflow?.name ?? "Piper"}</h1>
             <span>{selectedWorkflow?.path ?? `${providerLabel} provider`}</span>
           </div>
           <div className="run-actions">

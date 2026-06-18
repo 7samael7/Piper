@@ -8,7 +8,7 @@ on:
       greeting:
         description: Message to print
         required: false
-        default: Hello from Pipeline Workbench
+        default: Hello from Piper
 
 jobs:
   lint:

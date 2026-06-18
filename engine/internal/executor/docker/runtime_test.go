@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
 )
 
 func TestResolveJobImageForSetupDotnet(t *testing.T) {

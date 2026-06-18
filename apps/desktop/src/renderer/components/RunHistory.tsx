@@ -1,5 +1,5 @@
 import { History } from "lucide-react";
-import type { RunRecord } from "@pipeline-workbench/shared-types";
+import type { RunRecord } from "@piper/shared-types";
 
 interface RunHistoryProps {
   runs: RunRecord[];

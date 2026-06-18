@@ -3,7 +3,7 @@ package azure
 import (
 	"testing"
 
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
 )
 
 func TestParseAzureStagesJobsAndSteps(t *testing.T) {

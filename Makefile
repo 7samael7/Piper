@@ -1,4 +1,4 @@
-.PHONY: install desktop engine test clean
+.PHONY: install desktop engine test dmg clean
 
 install:
 	npm install
@@ -8,12 +8,15 @@ desktop:
 	npm --workspace apps/desktop run start
 
 engine:
-	cd engine && go build -o bin/pipeline-engine ./cmd/daemon
+	cd engine && go build -o bin/piper-engine ./cmd/daemon
 
 test:
 	cd engine && go test ./...
 	npm --workspace packages/shared-types run build
 	npm --workspace apps/desktop run typecheck
+
+dmg: engine
+	npm --workspace apps/desktop run make -- --platform=darwin
 
 clean:
 	rm -rf apps/desktop/.vite apps/desktop/out apps/desktop/node_modules packages/shared-types/dist node_modules engine/bin

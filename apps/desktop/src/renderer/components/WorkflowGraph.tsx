@@ -1,5 +1,5 @@
 import { Background, Controls, MiniMap, ReactFlow, type Edge, type Node } from "@xyflow/react";
-import type { WorkflowDetails } from "@pipeline-workbench/shared-types";
+import type { WorkflowDetails } from "@piper/shared-types";
 import { useMemo } from "react";
 
 interface WorkflowGraphProps {

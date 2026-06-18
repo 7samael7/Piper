@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pipeline-workbench/engine/internal/logs"
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/logs"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
 	_ "modernc.org/sqlite"
 )
 
@@ -51,13 +51,13 @@ type Store struct {
 }
 
 func OpenDefault(ctx context.Context) (*Store, error) {
-	path := os.Getenv("PIPELINE_WORKBENCH_DB")
+	path := os.Getenv("PIPER_DB")
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, err
 		}
-		path = filepath.Join(home, ".pipeline-workbench", "workbench.db")
+		path = filepath.Join(home, ".piper", "piper.db")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err

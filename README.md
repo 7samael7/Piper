@@ -1,6 +1,6 @@
-# Pipeline Workbench
+# Piper
 
-Pipeline Workbench is an MVP desktop application for DevOps engineers who want to inspect and run CI/CD pipelines locally. The first-class providers are GitHub Actions, GitLab CI/CD, and Azure Pipelines YAML, all mapped through provider-neutral engine contracts.
+Piper is an MVP desktop application for DevOps engineers who want to inspect and run CI/CD pipelines locally. The first-class providers are GitHub Actions, GitLab CI/CD, and Azure Pipelines YAML, all mapped through provider-neutral engine contracts.
 
 The workbench is intentionally honest about local execution. It does not claim parity with hosted CI runners. Validation and run output mark features as supported, partially supported, or unsupported.
 
@@ -33,6 +33,14 @@ examples/azure-pipelines
 ```
 
 Docker Desktop, OrbStack, Colima, or another Docker-compatible daemon must be running to execute jobs locally. The engine checks `DOCKER_HOST`, the active Docker CLI context, and common local socket paths. Discovery, validation, graph visualization, and history work without Docker.
+
+## GitLab releases
+
+The root `.gitlab-ci.yml` runs Go and desktop checks on branches and merge requests. Tags such as `v0.2.0` additionally require a macOS runner tagged `macos`; that job builds a versioned DMG, uploads it to the GitLab Generic Package Registry, and creates a GitLab Release with installer and SHA-256 links.
+
+Packaged GitLab builds contain the project release endpoint and check it for newer semantic versions. The app offers the architecture-matching DMG when one is available. Public GitLab projects work without credentials. Private projects can provide `PIPER_UPDATE_TOKEN` when launching the app.
+
+For trusted distribution, install a Developer ID Application certificate on the macOS runner and set `APPLE_SIGN_IDENTITY`. Notarization is enabled when `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` are also present.
 
 ## Current Provider Support
 

@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/json"
 
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
 )
 
 type rpcRequest struct {

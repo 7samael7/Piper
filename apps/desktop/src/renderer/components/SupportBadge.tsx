@@ -1,4 +1,4 @@
-import type { SupportLevel } from "@pipeline-workbench/shared-types";
+import type { SupportLevel } from "@piper/shared-types";
 
 interface SupportBadgeProps {
   support: SupportLevel;

@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pipeline-workbench/engine/internal/pipeline/graph"
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
-	"github.com/pipeline-workbench/engine/internal/pipeline/validation"
+	"github.com/7samael7/Piper/engine/internal/pipeline/graph"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/pipeline/validation"
 	"gopkg.in/yaml.v3"
 )
 

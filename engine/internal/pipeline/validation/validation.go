@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pipeline-workbench/engine/internal/pipeline/graph"
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/pipeline/graph"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
 )
 
 func Validate(_ context.Context, workflow *model.Workflow) model.ValidationReport {

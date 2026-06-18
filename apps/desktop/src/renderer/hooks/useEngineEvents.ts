@@ -1,15 +1,15 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { RunEvent } from "@pipeline-workbench/shared-types";
-import { useWorkbenchStore } from "../store/workbenchStore";
+import type { RunEvent } from "@piper/shared-types";
+import { usePiperStore } from "../store/piperStore";
 
 export function useEngineEvents() {
-  const appendRunEvent = useWorkbenchStore((state) => state.appendRunEvent);
-  const setActiveRunId = useWorkbenchStore((state) => state.setActiveRunId);
+  const appendRunEvent = usePiperStore((state) => state.appendRunEvent);
+  const setActiveRunId = usePiperStore((state) => state.setActiveRunId);
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    return window.pipelineWorkbench.onEngineEvent((event) => {
+    return window.piper.onEngineEvent((event) => {
       if (event.method !== "run.event") {
         return;
       }

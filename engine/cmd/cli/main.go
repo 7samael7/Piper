@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
-	"github.com/pipeline-workbench/engine/internal/providers/azure"
-	"github.com/pipeline-workbench/engine/internal/providers/github"
-	"github.com/pipeline-workbench/engine/internal/providers/gitlab"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/providers/azure"
+	"github.com/7samael7/Piper/engine/internal/providers/github"
+	"github.com/7samael7/Piper/engine/internal/providers/gitlab"
 )
 
 func main() {

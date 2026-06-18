@@ -16,10 +16,10 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/google/uuid"
-	"github.com/pipeline-workbench/engine/internal/logs"
-	"github.com/pipeline-workbench/engine/internal/pipeline/graph"
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
-	"github.com/pipeline-workbench/engine/internal/secrets"
+	"github.com/7samael7/Piper/engine/internal/logs"
+	"github.com/7samael7/Piper/engine/internal/pipeline/graph"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/secrets"
 )
 
 type Executor struct {
@@ -161,7 +161,7 @@ func createJobContainer(ctx context.Context, cli *client.Client, imageName, repo
 			Source: repoPath,
 			Target: "/workspace",
 		}},
-	}, nil, nil, "pipeline-workbench-"+uuid.NewString())
+	}, nil, nil, "piper-"+uuid.NewString())
 	if err != nil {
 		return "", fmt.Errorf("create job container: %w", err)
 	}
@@ -257,8 +257,8 @@ func selectedJobs(workflow *model.Workflow, jobID string) ([]model.Job, error) {
 func buildEnv(request model.RunRequest, job model.Job, step model.Step) []string {
 	values := map[string]string{
 		"CI":                          "true",
-		"PIPELINE_WORKBENCH_PROVIDER": string(request.Provider),
-		"PIPELINE_WORKBENCH_EVENT":    request.EventName,
+		"PIPER_PROVIDER": string(request.Provider),
+		"PIPER_EVENT":    request.EventName,
 	}
 	if jobUsesAction(job, setupDotnetAction) {
 		values["DOTNET_ROLL_FORWARD"] = "Major"

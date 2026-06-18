@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import type { ProviderID, RunEvent } from "@pipeline-workbench/shared-types";
+import type { ProviderID, RunEvent } from "@piper/shared-types";
 
-interface WorkbenchState {
+interface PiperState {
   repoPath: string;
   selectedProvider: ProviderID;
   selectedWorkflowPath: string;
@@ -17,7 +17,7 @@ interface WorkbenchState {
   clearRunEvents: () => void;
 }
 
-export const useWorkbenchStore = create<WorkbenchState>((set) => ({
+export const usePiperStore = create<PiperState>((set) => ({
   repoPath: "",
   selectedProvider: "github",
   selectedWorkflowPath: "",

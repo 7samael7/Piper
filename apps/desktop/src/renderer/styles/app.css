@@ -68,6 +68,7 @@ button {
 .primary-button,
 .secondary-button,
 .danger-button,
+.update-button,
 .tab {
   display: inline-flex;
   align-items: center;
@@ -103,17 +104,58 @@ button {
   font-weight: 700;
 }
 
+.update-button {
+  border: 1px solid #769780;
+  background: #ffffff;
+  color: #1d5a45;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .primary-button:hover,
 .secondary-button:hover,
-.danger-button:hover {
+.danger-button:hover,
+.update-button:hover {
   filter: brightness(0.97);
 }
 
 .primary-button:disabled,
 .secondary-button:disabled,
-.danger-button:disabled {
+.danger-button:disabled,
+.update-button:disabled {
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+  border-top: 1px solid #d2dcd2;
+  padding-top: 10px;
+  color: #68766d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border: 1px solid #bdcabe;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #355548;
+  cursor: pointer;
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .repo-path {

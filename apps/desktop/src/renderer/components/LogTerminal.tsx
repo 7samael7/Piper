@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import type { RunEvent } from "@pipeline-workbench/shared-types";
+import type { RunEvent } from "@piper/shared-types";
 
 interface LogTerminalProps {
   events: RunEvent[];

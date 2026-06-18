@@ -3,6 +3,7 @@ import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { UpdateService } from "./updates";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -33,7 +34,7 @@ class EngineClient {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        PIPELINE_WORKBENCH_DB: process.env.PIPELINE_WORKBENCH_DB ?? defaultDatabasePath(),
+        PIPER_DB: process.env.PIPER_DB ?? defaultDatabasePath(),
       },
     });
 
@@ -125,6 +126,7 @@ class EngineClient {
 }
 
 const engine = new EngineClient();
+const updates = new UpdateService();
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -132,7 +134,7 @@ function createWindow() {
     height: 980,
     minWidth: 1100,
     minHeight: 760,
-    title: "Pipeline Workbench",
+    title: "Piper",
     backgroundColor: "#f7f8f3",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -160,6 +162,12 @@ app.whenReady().then(() => {
   ipcMain.handle("engine.request", async (_event, method: string, params?: unknown) => {
     return engine.request(method, params);
   });
+  ipcMain.handle("app.info", () => ({
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+  }));
+  ipcMain.handle("update.check", () => updates.check());
+  ipcMain.handle("update.openLatest", () => updates.openLatest());
 
   createWindow();
   app.on("activate", () => {
@@ -186,13 +194,13 @@ function broadcastEngineEvent(method: string, params: unknown) {
 }
 
 function resolveEngineCommand(): { command: string; args: string[]; cwd?: string } {
-  const packagedBinary = path.join(process.resourcesPath, process.platform === "win32" ? "pipeline-engine.exe" : "pipeline-engine");
+  const packagedBinary = path.join(process.resourcesPath, process.platform === "win32" ? "piper-engine.exe" : "piper-engine");
   if (app.isPackaged && fs.existsSync(packagedBinary)) {
     return { command: packagedBinary, args: [] };
   }
 
   const repoRoot = path.resolve(process.cwd(), "../..");
-  const devBinary = path.join(repoRoot, "engine", "bin", process.platform === "win32" ? "pipeline-engine.exe" : "pipeline-engine");
+  const devBinary = path.join(repoRoot, "engine", "bin", process.platform === "win32" ? "piper-engine.exe" : "piper-engine");
   if (fs.existsSync(devBinary)) {
     return { command: devBinary, args: [] };
   }
@@ -205,5 +213,5 @@ function resolveEngineCommand(): { command: string; args: string[]; cwd?: string
 }
 
 function defaultDatabasePath() {
-  return path.join(app.getPath("userData"), "workbench.db");
+  return path.join(app.getPath("userData"), "piper.db");
 }

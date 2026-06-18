@@ -3,6 +3,8 @@ node_modules/
 # Electron Forge and Vite output
 apps/desktop/.vite/
 apps/desktop/out/
+dist/
+release.env
 
 # TypeScript package output
 packages/shared-types/dist/
@@ -18,3 +20,6 @@ engine/bin/
 .idea/
 .vscode/
 /.idea/
+
+
+../.DS_Store

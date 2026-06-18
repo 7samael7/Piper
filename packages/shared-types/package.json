@@ -1,5 +1,5 @@
 {
-  "name": "@pipeline-workbench/shared-types",
+  "name": "@piper/shared-types",
   "version": "0.1.0",
   "private": true,
   "type": "module",

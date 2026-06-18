@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@pipeline-workbench/shared-types": path.resolve(__dirname, "../../packages/shared-types/src/index.ts"),
+      "@piper/shared-types": path.resolve(__dirname, "../../packages/shared-types/src/index.ts"),
     },
   },
 });

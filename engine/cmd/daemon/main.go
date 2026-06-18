@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/pipeline-workbench/engine/internal/api"
-	"github.com/pipeline-workbench/engine/internal/persistence"
+	"github.com/7samael7/Piper/engine/internal/api"
+	"github.com/7samael7/Piper/engine/internal/persistence"
 )
 
 func main() {

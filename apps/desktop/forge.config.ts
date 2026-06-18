@@ -1,19 +1,36 @@
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { MakerDeb } from "@electron-forge/maker-deb";
+import { MakerDMG } from "@electron-forge/maker-dmg";
 import { MakerRpm } from "@electron-forge/maker-rpm";
 import { MakerSquirrel } from "@electron-forge/maker-squirrel";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 
+const notarize =
+  process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID
+    ? {
+        appleId: process.env.APPLE_ID,
+        appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
+        teamId: process.env.APPLE_TEAM_ID,
+      }
+    : undefined;
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    extraResource: ["../../engine/bin/pipeline-engine"],
+    appBundleId: "dev.piper.desktop",
+    extraResource: ["../../engine/bin/piper-engine", "update-config.json"],
+    ...(process.env.APPLE_SIGN_IDENTITY ? { osxSign: { identity: process.env.APPLE_SIGN_IDENTITY } } : {}),
+    ...(notarize ? { osxNotarize: notarize } : {}),
   },
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({}),
     new MakerZIP({}, ["darwin"]),
+    new MakerDMG({
+      format: "ULFO",
+      name: "Piper",
+    }),
     new MakerRpm({}),
     new MakerDeb({}),
   ],

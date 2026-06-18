@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	dockerexecutor "github.com/pipeline-workbench/engine/internal/executor/docker"
-	"github.com/pipeline-workbench/engine/internal/logs"
-	"github.com/pipeline-workbench/engine/internal/persistence"
-	"github.com/pipeline-workbench/engine/internal/pipeline/model"
-	"github.com/pipeline-workbench/engine/internal/providers/azure"
-	"github.com/pipeline-workbench/engine/internal/providers/github"
-	"github.com/pipeline-workbench/engine/internal/providers/gitlab"
+	dockerexecutor "github.com/7samael7/Piper/engine/internal/executor/docker"
+	"github.com/7samael7/Piper/engine/internal/logs"
+	"github.com/7samael7/Piper/engine/internal/persistence"
+	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/providers/azure"
+	"github.com/7samael7/Piper/engine/internal/providers/github"
+	"github.com/7samael7/Piper/engine/internal/providers/gitlab"
 )
 
 type Server struct {

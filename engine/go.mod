@@ -1,4 +1,4 @@
-module github.com/pipeline-workbench/engine
+module github.com/7samael7/Piper/engine
 
 go 1.25.0
 

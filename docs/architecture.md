@@ -1,6 +1,6 @@
 # Architecture
 
-Pipeline Workbench is split into a desktop shell and a local execution engine.
+Piper is split into a desktop shell and a local execution engine.
 
 ## Desktop
 

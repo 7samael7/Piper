@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { AlertTriangle, CheckCircle2, FileCode2, ListChecks } from "lucide-react";
-import type { PipelineJob, WorkflowDetails } from "@pipeline-workbench/shared-types";
+import type { PipelineJob, WorkflowDetails } from "@piper/shared-types";
 import { SupportBadge } from "./SupportBadge";
 
 interface JobInspectorProps {
