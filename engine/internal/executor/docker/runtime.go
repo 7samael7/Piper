@@ -2,20 +2,25 @@ package docker
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/workspace"
 )
 
 const (
 	setupDotnetAction = "actions/setup-dotnet"
+	setupGoAction     = "actions/setup-go"
 	setupNodeAction   = "actions/setup-node"
 )
 
 var runtimeVersionPattern = regexp.MustCompile(`^v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?(?:[-+].*)?$`)
+var goDirectivePattern = regexp.MustCompile(`(?m)^go (\d+(?:\.\d+)*)`)
 
-func resolveJobImage(defaultImage string, job model.Job) (string, error) {
+func resolveJobImage(defaultImage string, job model.Job, repoPath string) (string, error) {
 	if job.Image != "" {
 		return job.Image, nil
 	}
@@ -28,6 +33,8 @@ func resolveJobImage(defaultImage string, job model.Job) (string, error) {
 		switch actionName(step.Uses) {
 		case setupDotnetAction:
 			candidate, err = dotnetImage(step.With["dotnet-version"])
+		case setupGoAction:
+			candidate, err = goImage(step.With["go-version"], step.With["go-version-file"], repoPath)
 		case setupNodeAction:
 			candidate, err = nodeImage(step.With["node-version"])
 		default:
@@ -60,6 +67,34 @@ func dotnetImage(version string) (string, error) {
 		return "", fmt.Errorf("unsupported dotnet-version %q: %w", version, err)
 	}
 	return "mcr.microsoft.com/dotnet/sdk:" + tag, nil
+}
+
+func goImage(version, versionFile, repoPath string) (string, error) {
+	if strings.TrimSpace(version) == "" && strings.TrimSpace(versionFile) != "" {
+		resolved, err := workspace.Resolve(repoPath, versionFile)
+		if err != nil {
+			return "", fmt.Errorf("resolve go-version-file %q: %w", versionFile, err)
+		}
+		content, err := os.ReadFile(resolved)
+		if err != nil {
+			return "", fmt.Errorf("read go-version-file %q: %w", versionFile, err)
+		}
+		version = strings.TrimSpace(string(content))
+		switch filepath.Base(resolved) {
+		case "go.mod", "go.work":
+			match := goDirectivePattern.FindStringSubmatch(string(content))
+			if len(match) > 1 {
+				version = match[1]
+			} else {
+				version = ""
+			}
+		}
+	}
+	tag, err := normalizedRuntimeVersion(version, true)
+	if err != nil {
+		return "", fmt.Errorf("unsupported Go version %q: %w", version, err)
+	}
+	return "golang:" + tag + "-bookworm", nil
 }
 
 func nodeImage(version string) (string, error) {
@@ -114,7 +149,7 @@ func actionName(uses string) string {
 
 func isSetupAction(uses string) bool {
 	switch actionName(uses) {
-	case setupDotnetAction, setupNodeAction:
+	case setupDotnetAction, setupGoAction, setupNodeAction:
 		return true
 	default:
 		return false
@@ -134,6 +169,8 @@ func setupActionMessage(step model.Step, imageName string) string {
 	switch actionName(step.Uses) {
 	case setupDotnetAction:
 		return fmt.Sprintf("actions/setup-dotnet is approximated locally with Docker image %s; framework roll-forward may be used because hosted runner tool caches are not reproduced.", imageName)
+	case setupGoAction:
+		return fmt.Sprintf("actions/setup-go is approximated locally with Docker image %s; action caching and hosted-runner tool caches are not reproduced.", imageName)
 	case setupNodeAction:
 		return fmt.Sprintf("actions/setup-node is approximated locally with Docker image %s; action caching and hosted-runner behavior are not emulated.", imageName)
 	default:

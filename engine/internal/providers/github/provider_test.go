@@ -102,6 +102,13 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
 `))
 	if err != nil {
 		t.Fatalf("parse workflow: %v", err)
@@ -112,6 +119,12 @@ jobs:
 	}
 	if workflow.Jobs[1].Steps[0].Support != model.SupportPartial {
 		t.Fatalf("setup-node support = %s, want partial", workflow.Jobs[1].Steps[0].Support)
+	}
+	if workflow.Jobs[2].Steps[0].Support != model.SupportPartial {
+		t.Fatalf("setup-go support = %s, want partial", workflow.Jobs[2].Steps[0].Support)
+	}
+	if !githubHasFeature(workflow.Jobs[2].Steps[0].Features, "github.setup-runtime") {
+		t.Fatal("expected setup-go to use the setup runtime feature")
 	}
 	if got := workflow.Jobs[1].Steps[1].WorkingDirectory; got != "frontend" {
 		t.Fatalf("working directory = %q, want frontend", got)

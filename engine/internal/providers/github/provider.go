@@ -387,7 +387,7 @@ func parseSteps(node *yaml.Node, jobPath string) []model.Step {
 		case strings.HasPrefix(step.Uses, "actions/checkout@"):
 			step.Support = model.SupportPartial
 			step.Features = append(step.Features, support.Ref("github.checkout", stepPath+".uses", origin(mappingValue(item, "uses"))))
-		case strings.HasPrefix(step.Uses, "actions/setup-dotnet@"), strings.HasPrefix(step.Uses, "actions/setup-node@"):
+		case strings.HasPrefix(step.Uses, "actions/setup-dotnet@"), strings.HasPrefix(step.Uses, "actions/setup-go@"), strings.HasPrefix(step.Uses, "actions/setup-node@"):
 			step.Support = model.SupportPartial
 			step.Features = append(step.Features, support.Ref("github.setup-runtime", stepPath+".uses", origin(mappingValue(item, "uses"))))
 		case strings.HasPrefix(step.Uses, "actions/upload-artifact@"), strings.HasPrefix(step.Uses, "actions/download-artifact@"), strings.HasPrefix(step.Uses, "actions/cache@"):

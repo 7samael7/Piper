@@ -150,7 +150,7 @@ Support classifications come from the machine-readable registry used by validati
 
 - The default image is `ubuntu:22.04`.
 - A GitLab job's `image` is used when present.
-- GitHub `actions/setup-node` and `actions/setup-dotnet` select a matching Node or .NET SDK image when Piper can map the requested version.
+- GitHub `actions/setup-node`, `actions/setup-go`, and `actions/setup-dotnet` select a matching Node, Go, or .NET SDK image when Piper can map the requested version.
 - GitHub `runs-on` and Azure `pool` values are shown but do not select a hosted runner image.
 - Every selected image must contain `/bin/bash`; minimal images such as Alpine often do not.
 

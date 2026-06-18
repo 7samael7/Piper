@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,7 +18,7 @@ func TestResolveJobImageForSetupDotnet(t *testing.T) {
 		}},
 	}
 
-	imageName, err := resolveJobImage("ubuntu:22.04", job)
+	imageName, err := resolveJobImage("ubuntu:22.04", job, t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve image: %v", err)
 	}
@@ -34,7 +36,7 @@ func TestResolveJobImageForSetupNode(t *testing.T) {
 		}},
 	}
 
-	imageName, err := resolveJobImage("ubuntu:22.04", job)
+	imageName, err := resolveJobImage("ubuntu:22.04", job, t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve image: %v", err)
 	}
@@ -52,7 +54,7 @@ func TestResolveJobImageRejectsMultipleSetupRuntimes(t *testing.T) {
 		},
 	}
 
-	_, err := resolveJobImage("ubuntu:22.04", job)
+	_, err := resolveJobImage("ubuntu:22.04", job, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "multiple setup runtimes") {
 		t.Fatalf("expected multiple runtime error, got %v", err)
 	}
@@ -67,11 +69,75 @@ func TestExplicitProviderImageTakesPrecedence(t *testing.T) {
 		}},
 	}
 
-	imageName, err := resolveJobImage("ubuntu:22.04", job)
+	imageName, err := resolveJobImage("ubuntu:22.04", job, t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve image: %v", err)
 	}
 	if imageName != job.Image {
+		t.Fatalf("image = %q", imageName)
+	}
+}
+
+func TestResolveJobImageForSetupGoVersion(t *testing.T) {
+	job := model.Job{
+		ID: "go",
+		Steps: []model.Step{{
+			Uses: "actions/setup-go@v5",
+			With: map[string]string{"go-version": "1.24.x"},
+		}},
+	}
+
+	imageName, err := resolveJobImage("ubuntu:22.04", job, t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve image: %v", err)
+	}
+	if imageName != "golang:1.24-bookworm" {
+		t.Fatalf("image = %q", imageName)
+	}
+}
+
+func TestResolveJobImageForSetupGoVersionFile(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "engine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "engine", "go.mod"), []byte("module example.com/test\n\ngo 1.25.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	job := model.Job{
+		ID: "go",
+		Steps: []model.Step{{
+			Uses: "actions/setup-go@v5",
+			With: map[string]string{"go-version-file": "engine/go.mod"},
+		}},
+	}
+
+	imageName, err := resolveJobImage("ubuntu:22.04", job, repo)
+	if err != nil {
+		t.Fatalf("resolve image: %v", err)
+	}
+	if imageName != "golang:1.25.0-bookworm" {
+		t.Fatalf("image = %q", imageName)
+	}
+}
+
+func TestResolveJobImageForSetupGoPrefersExplicitVersion(t *testing.T) {
+	job := model.Job{
+		ID: "go",
+		Steps: []model.Step{{
+			Uses: "actions/setup-go@v5",
+			With: map[string]string{
+				"go-version":      "1.23",
+				"go-version-file": "missing/go.mod",
+			},
+		}},
+	}
+
+	imageName, err := resolveJobImage("ubuntu:22.04", job, t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve image: %v", err)
+	}
+	if imageName != "golang:1.23-bookworm" {
 		t.Fatalf("image = %q", imageName)
 	}
 }

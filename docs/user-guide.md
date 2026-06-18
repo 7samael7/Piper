@@ -285,6 +285,7 @@ Piper chooses an image in this order:
 GitHub runtime mappings:
 
 - `actions/setup-node` → `node:<version>-bookworm`
+- `actions/setup-go` → `golang:<version>-bookworm`
 - `actions/setup-dotnet` → `mcr.microsoft.com/dotnet/sdk:<version>`
 
 Piper supports one setup runtime image per job. If setup actions require conflicting images, the job fails before execution.

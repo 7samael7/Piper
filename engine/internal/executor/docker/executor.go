@@ -213,7 +213,7 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 	if job.HasStrategy && job.Matrix == nil {
 		return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("job %s declares an unsupported strategy", job.ID)}
 	}
-	imageName, err := resolveJobImage(e.image, job)
+	imageName, err := resolveJobImage(e.image, job, request.RepoPath)
 	if err != nil {
 		return scheduler.Result{Status: model.RunFailed, Error: err}
 	}
