@@ -1,64 +1,180 @@
 # Architecture
 
-Piper is split into a desktop shell and a local execution engine.
+Piper consists of an Electron desktop application and a Go sidecar engine. The renderer never receives Node.js or filesystem access directly; Electron's preload layer exposes a narrow IPC bridge, and the main process owns the engine subprocess.
 
-## Desktop
+```mermaid
+flowchart LR
+    U["User"] --> R["React renderer"]
+    R --> P["Electron preload bridge"]
+    P --> M["Electron main process"]
+    M <--> E["Go engine sidecar"]
+    E --> Y["Provider parsers"]
+    E --> D["Docker Engine"]
+    E --> S["SQLite store"]
+    Y --> W["Opened repository"]
+    D --> C["Per-job containers"]
+    W <--> C
+    E -. "run.event notifications" .-> M
+    M -. "IPC events" .-> R
+```
 
-The desktop app lives in `apps/desktop` and uses Electron Forge with Vite. Electron's main process owns the Go sidecar process and exposes a small IPC API to the renderer through the preload script.
+## Desktop application
 
-Renderer responsibilities:
+The desktop app lives in `apps/desktop` and uses Electron Forge, Vite, React, TypeScript, Monaco Editor, React Flow, xterm.js, Zustand, and TanStack Query.
 
-- Select a local repository.
-- Discover workflows through the engine.
-- Render workflow graphs with React Flow.
-- Show YAML and job details with Monaco Editor.
-- Configure run inputs, environment variables, and secrets.
-- Stream run events into an xterm.js terminal.
-- Show SQLite-backed run history.
+### Renderer
 
-The renderer never talks to the engine directly. It calls Electron IPC methods, and the main process forwards JSON-RPC requests to the sidecar.
+The renderer is responsible for:
 
-## Engine
+- Selecting and displaying a local repository path.
+- Switching between GitHub, GitLab, and Azure providers.
+- Listing discovered workflows.
+- Rendering the job dependency graph.
+- Showing job metadata, steps, raw YAML, validation, and feature support.
+- Collecting local event, input, environment, and secret configuration.
+- Starting and cancelling runs.
+- Rendering live structured events in an xterm.js terminal.
+- Listing recent run summaries for the selected repository.
 
-The Go engine lives in `engine`. `cmd/daemon` starts a newline-delimited JSON-RPC server over stdin/stdout. This keeps the MVP packaging simple and still lets a future version move the same API to sockets or gRPC.
+Zustand holds the current repository, provider, workflow, job selection, active run ID, and in-memory event stream. TanStack Query owns request-backed data such as providers, workflows, workflow details, history, application information, and update status.
+
+### Preload bridge
+
+Context isolation is enabled and Node integration is disabled. The preload script exposes only:
+
+- A repository directory picker.
+- Generic engine requests.
+- Application version information.
+- Update checks and update download/open behavior.
+- Subscription to engine events.
+
+### Main process
+
+The Electron main process:
+
+1. Resolves and starts the Go engine.
+2. Sends newline-delimited JSON-RPC requests over the engine's stdin.
+3. Parses responses and notifications from stdout.
+4. Forwards engine notifications to renderer windows over IPC.
+5. Routes engine diagnostics from stderr to the Electron console.
+6. Sets the desktop database path.
+7. Owns GitHub Release update checks.
+
+In a packaged application, the engine is loaded from Electron resources. In development, Piper first looks for `engine/bin/piper-engine` and otherwise falls back to `go run ./cmd/daemon`.
+
+## Go engine
+
+The engine lives in `engine`. `cmd/daemon` starts the local JSON-RPC server, while `cmd/cli` is a small workflow-discovery utility.
 
 Core packages:
 
-- `internal/pipeline/model`: provider-neutral workflow, job, graph, validation, and run types.
-- `internal/providers/github`: GitHub Actions discovery and YAML parser.
-- `internal/providers/gitlab`: GitLab CI/CD discovery and YAML parser.
-- `internal/providers/azure`: Azure Pipelines YAML discovery and parser.
-- `internal/pipeline/graph`: dependency graph construction and topological sorting.
-- `internal/pipeline/validation`: support classification and validation.
-- `internal/executor/docker`: Docker Engine SDK based local executor.
-- `internal/persistence`: SQLite run history.
-- `internal/logs`: structured event types.
-- `internal/secrets`: log masking.
-- `internal/api`: JSON-RPC server and method handlers.
+- `internal/api`: request dispatch, asynchronous run management, cancellation, and notifications.
+- `internal/pipeline/model`: provider-neutral workflows, jobs, steps, graphs, validation, and run records.
+- `internal/pipeline/graph`: graph construction and topological ordering.
+- `internal/pipeline/validation`: blocking validation and feature support classification.
+- `internal/providers/github`: GitHub Actions discovery and parsing.
+- `internal/providers/gitlab`: GitLab CI/CD discovery and parsing.
+- `internal/providers/azure`: Azure Pipelines discovery and parsing.
+- `internal/providers/yamlutil`: shared YAML node helpers.
+- `internal/executor/docker`: Docker connection, image selection, containers, shell execution, and event streaming.
+- `internal/persistence`: SQLite run and event persistence.
+- `internal/logs`: structured run-event types.
+- `internal/secrets`: exact-value log masking.
 
-## Provider model
+## Provider contract
 
-Providers implement a neutral interface:
+Providers map their YAML format into a common model:
 
 ```go
 type Provider interface {
-    ID() string
-    Discover(ctx context.Context, repoPath string) ([]model.WorkflowSummary, error)
-    Load(ctx context.Context, repoPath, workflowPath string) (*model.Workflow, []byte, error)
-    Validate(ctx context.Context, workflow *model.Workflow) model.ValidationReport
+    ID() ProviderID
+    Discover(ctx context.Context, repoPath string) ([]WorkflowSummary, error)
+    Load(ctx context.Context, repoPath, workflowPath string) (*Workflow, []byte, error)
+    Validate(ctx context.Context, workflow *Workflow) ValidationReport
 }
 ```
 
-Additional providers can be added by implementing the same contract and mapping provider YAML concepts into the neutral model. GitHub Actions, GitLab CI/CD, and Azure Pipelines all use this interface in the MVP.
+The neutral model allows the renderer, graph builder, validator, executor, and persistence layer to work without provider-specific branches except where execution semantics require one.
+
+## Request and event flow
+
+```mermaid
+sequenceDiagram
+    participant UI as Renderer
+    participant Main as Electron main
+    participant API as Go JSON-RPC server
+    participant Store as SQLite
+    participant Docker as Docker Engine
+
+    UI->>Main: run.start configuration
+    Main->>API: JSON-RPC request
+    API->>API: Load and validate workflow
+    API->>Store: Create queued run
+    API-->>Main: runId
+    Main-->>UI: runId
+    API->>Docker: Pull image and create job container
+    loop Run lifecycle and logs
+        Docker-->>API: stdout/stderr/status
+        API->>Store: Persist event
+        API-->>Main: run.event notification
+        Main-->>UI: IPC event
+    end
+    API->>Store: Store final status
+```
+
+`run.start` is asynchronous. The request returns a run ID after validation and persistence; execution continues in a goroutine. A cancellation request invokes the run's `context.CancelFunc`, and the Docker executor kills the active job container if a step is running.
 
 ## Execution model
 
-Local execution is deliberately narrow:
+The local executor deliberately favors understandable behavior over broad emulation:
 
-1. The engine validates and stores a run record.
-2. The Docker executor builds a job order from the graph.
-3. Shell steps run sequentially in Docker containers with the repository mounted at `/workspace`. The default image is `ubuntu:22.04`; GitLab job images are used when present.
-4. Structured run events are persisted and emitted to the Electron app.
-5. Cancellation flows through Go `context.Context` and kills the active container.
+1. Load and validate the selected workflow.
+2. Persist a queued run.
+3. Emit compatibility notices for partial and unsupported features.
+4. Connect to Docker using `DOCKER_HOST`, the active Docker context, the default endpoint, or known local socket paths.
+5. Resolve jobs in topological order, or select exactly one requested job.
+6. Resolve a job image and pull it.
+7. Create a container with the repository mounted at `/workspace`.
+8. Execute each shell step with `/bin/bash -lc` in that container.
+9. Stream masked stdout and stderr as structured events.
+10. Remove the container and continue to the next job.
+11. Persist the final run state.
 
-The MVP favors transparency over hidden emulation. Unsupported provider features are reported before and during execution.
+There is no parallel scheduling. Recognized conditions are retained for support reporting but are not evaluated. One container is shared by all steps in a job, but jobs do not share a container.
+
+## Persistence
+
+SQLite stores:
+
+- Run identity and configuration metadata.
+- Provider, workflow, optional selected job, event name, status, and timestamps.
+- Ordered structured events, including logs and compatibility notices.
+
+The desktop main process supplies `PIPER_DB`, normally pointing to Electron's user-data directory. A standalone engine defaults to `~/.piper/piper.db`.
+
+The current renderer requests the 25 newest run summaries for the open repository. Events are persisted for future use, although the current UI does not reopen an old event stream.
+
+## Update architecture
+
+The update service is owned by the Electron main process and currently supports macOS DMG releases:
+
+1. Read `apps/desktop/update-config.json` from application resources.
+2. Query the configured GitHub latest-release API.
+3. Compare semantic versions.
+4. Select the DMG matching `process.arch`.
+5. Download the DMG and optional `.sha256` file.
+6. Verify SHA-256 when a checksum is available.
+7. Move the DMG to the user's Downloads directory and open it.
+
+The app does not silently replace itself. Private repositories can provide `PIPER_UPDATE_TOKEN` when launching Piper.
+
+## Security boundaries
+
+- The renderer is isolated from Node.js.
+- Engine access is local stdio rather than a listening network service.
+- Workflow code is not sandboxed from the mounted repository.
+- Docker containers use Docker's ordinary network unless the local daemon is configured otherwise.
+- Supplied secrets are environment variables and exact-value log masking is best-effort.
+- The repository path and workflow YAML should be treated as trusted input before execution.
+
+See the [Engine API](engine-api.md) for protocol details and the [Provider Support Reference](provider-support.md) for behavior at the YAML-feature level.

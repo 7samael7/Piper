@@ -1,30 +1,76 @@
+<p align="center">
+  <img src="apps/desktop/assets/piper.png" alt="Piper logo" width="150">
+</p>
+
 # Piper
 
-Piper is an MVP desktop application for DevOps engineers who want to inspect and run CI/CD pipelines locally. The first-class providers are GitHub Actions, GitLab CI/CD, and Azure Pipelines YAML, all mapped through provider-neutral engine contracts.
+Piper is a desktop workbench for inspecting, validating, visualizing, and running CI/CD pipelines on your own machine.
 
-The workbench is intentionally honest about local execution. It does not claim parity with hosted CI runners. Validation and run output mark features as supported, partially supported, or unsupported.
+Open a repository, choose GitHub Actions, GitLab CI/CD, or Azure Pipelines, and Piper translates the pipeline into one provider-neutral job graph. Shell steps can then run in local Docker containers while structured logs stream back to the desktop app.
 
-## What is included
+> [!IMPORTANT]
+> Piper is a local approximation, not a hosted-runner emulator. Review the support labels before running a pipeline. Conditions, cloud services, credentials, runner images, and many provider-specific features do not behave exactly as they do in hosted CI.
 
-- Electron Forge desktop app with React, TypeScript, Vite, Monaco Editor, React Flow, xterm.js, Zustand, and TanStack Query.
-- Go sidecar engine launched by Electron over newline-delimited JSON-RPC on stdin/stdout.
-- GitHub Actions workflow discovery under `.github/workflows`.
-- GitLab CI/CD discovery from `.gitlab-ci.yml` or `.gitlab-ci.yaml`.
-- Azure Pipelines discovery from `azure-pipelines.yml`, `azure-pipelines.yaml`, `.azure-pipelines/`, `azure-pipelines/`, or `pipelines/`.
-- YAML parsing, graph construction, validation, and unsupported feature reporting.
-- Local Docker execution for shell `run` steps, with sequential job execution for the MVP.
-- Real-time structured JSON log events and cancellation via `context.Context`.
-- SQLite-backed run history.
+## What Piper does
 
-## Quick start
+- Discovers supported pipeline YAML files in a local repository.
+- Builds an interactive dependency graph from jobs, stages, and `needs`/`dependsOn`.
+- Shows jobs, steps, raw YAML, validation issues, and feature-level support.
+- Runs an entire workflow or one selected job in Docker.
+- Accepts an event name, inputs, environment variables, and secrets for a local run.
+- Streams stdout, stderr, lifecycle events, and compatibility notices.
+- Masks supplied secret values in emitted logs.
+- Stores local run summaries and events in SQLite.
+- Checks GitHub Releases for architecture-matching macOS updates.
+
+## Install
+
+### macOS release
+
+Automated releases currently publish DMGs for Apple Silicon (`arm64`) and Intel (`x64`) Macs:
+
+[Download the latest Piper release](https://github.com/7samael7/Piper/releases/latest)
+
+Some releases may be unsigned. macOS can warn about an unsigned application; only bypass Gatekeeper if you trust the downloaded build and its source.
+
+### Run from source
+
+Requirements:
+
+- Node.js 24 (the primary CI baseline)
+- npm
+- Go 1.25 or newer
+- Docker Desktop, OrbStack, Colima, or another Docker-compatible daemon for local execution
+
+Docker is not required to discover, inspect, validate, or visualize workflows.
 
 ```sh
+git clone https://github.com/7samael7/Piper.git
+cd Piper
 make install
 make engine
 make desktop
 ```
 
-The desktop app can open a local repository. To try the bundled samples, open one of:
+After the first installation, this shorter command rebuilds the engine and launches the desktop app:
+
+```sh
+./scripts/dev.sh
+```
+
+## Your first local run
+
+1. Start Piper and select **Open Repository**.
+2. Choose the **GitHub**, **GitLab**, or **Azure** provider tab.
+3. Select a discovered workflow.
+4. Review its graph, validation report, and support badges.
+5. Optionally enter an event name, inputs, environment variables, or secrets.
+6. Select **Run Workflow**.
+7. Watch the **Live Logs** panel and cancel the run if needed.
+
+Clicking a job node changes the action to **Run Job**. A job-only run executes that job by itself; it does not execute its dependencies first. To return to a workflow run, select the workflow in the sidebar again.
+
+The repository contains examples for each provider:
 
 ```text
 examples/github-actions
@@ -32,59 +78,104 @@ examples/gitlab-ci
 examples/azure-pipelines
 ```
 
-Docker Desktop, OrbStack, Colima, or another Docker-compatible daemon must be running to execute jobs locally. The engine checks `DOCKER_HOST`, the active Docker CLI context, and common local socket paths. Discovery, validation, graph visualization, and history work without Docker.
+See the [User Guide](docs/user-guide.md) for a tour of every part of the interface and the local execution model.
 
-## GitHub releases
+## Run configuration
 
-The root GitHub Actions workflows run Go and desktop checks on branches and pull requests. After CI succeeds on `master`, the `Release` workflow reads the version from the root `package.json`, creates the matching Git tag, builds Intel and Apple Silicon DMGs, generates SHA-256 checksum files, and publishes them to a GitHub Release.
+The Inputs, Environment, and Secrets fields accept one `KEY=value` entry per line. Blank lines and lines beginning with `#` are ignored.
 
-To create a release, update the project version before merging or pushing to `master`:
+```text
+# Inputs become INPUT_* variables
+target=staging
 
-```sh
-node scripts/set-version.mjs 0.2.0
-npm install --package-lock-only --ignore-scripts
-git add package.json package-lock.json apps/desktop/package.json packages/shared-types/package.json
-git commit -m "Prepare v0.2.0"
-git push origin master
+# Environment and secrets keep their supplied names
+LOG_LEVEL=debug
+API_TOKEN=replace-me
 ```
 
-Once CI passes, GitHub automatically creates `v0.2.0` and its release. If that release already exists, the release workflow safely skips it. You can still open **Actions → Release → Run workflow** and enter a version for a manual release.
+Input names are uppercased and non-alphanumeric characters become underscores, so `release-channel=beta` becomes `INPUT_RELEASE_CHANNEL=beta`.
 
-Packaged builds check the repository's latest GitHub Release and offer the architecture-matching DMG. Public repositories work without credentials. Private repositories can provide a fine-grained token with Contents read access through `PIPER_UPDATE_TOKEN` when launching the app.
+Default event names are:
 
-Unsigned DMGs are produced when no Apple credentials are configured. For trusted distribution, configure these GitHub Actions secrets:
+| Provider | Default event |
+| --- | --- |
+| GitHub Actions | `workflow_dispatch` |
+| GitLab CI/CD | `web` |
+| Azure Pipelines | `manual` |
 
-- `APPLE_CERTIFICATE`: Base64-encoded Developer ID Application `.p12` certificate.
-- `APPLE_CERTIFICATE_PASSWORD`: Password for the `.p12` certificate.
-- `APPLE_SIGN_IDENTITY`: Certificate identity, such as `Developer ID Application: Example, Inc. (TEAMID)`.
-- `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`: Optional notarization credentials; configure all three together.
+The event name configures local environment variables such as `GITHUB_EVENT_NAME`, `CI_PIPELINE_SOURCE`, or `BUILD_REASON`. It does not evaluate the provider's trigger or condition rules.
 
-## Current Provider Support
+## Provider discovery
 
-Supported locally for all providers:
+| Provider | Files Piper discovers |
+| --- | --- |
+| GitHub Actions | Any `.yml` or `.yaml` file below `.github/workflows/` |
+| GitLab CI/CD | `.gitlab-ci.yml` and `.gitlab-ci.yaml` at the repository root |
+| Azure Pipelines | Root `azure-pipelines.yml`/`.yaml`, plus YAML below `.azure-pipelines/`, `azure-pipelines/`, and `pipelines/` |
 
-- Workflow discovery and YAML parsing.
-- Job dependency graph visualization.
-- Shell steps inside Docker with the repository mounted at `/workspace`; the default image is `ubuntu:22.04`.
-- GitLab job `image` values as per-job Docker images when present.
-- User-provided event name, inputs, environment variables, and secrets.
-- Secret masking in emitted logs.
+All three providers support YAML inspection, graph construction, validation, and Bash-based Docker execution. Provider-specific behavior and limitations are documented in the [Provider Support Reference](docs/provider-support.md).
 
-Partially supported:
+## Understanding support labels
 
-- Job-level and step-level environment variables.
-- GitHub `actions/checkout` and Azure `checkout` as local no-ops, because the repository is already mounted.
-- GitHub `actions/setup-dotnet` and `actions/setup-node` through matching per-job SDK/runtime Docker images. Action caching and hosted tool-cache behavior are not emulated; .NET framework roll-forward may be used when the selected SDK image lacks an older target runtime.
-- GitHub job-level `defaults.run.working-directory` and `defaults.run.shell`.
-- GitLab stage ordering and Azure stage ordering are approximated through dependency edges.
-- Provider expression syntax and conditional rules are preserved and reported, but not fully evaluated.
-- Workflow-level triggers are parsed for display and local run configuration only.
+Piper labels workflows, jobs, steps, and individual features:
 
-Unsupported in the MVP:
+- `supported`: implemented for local use.
+- `partial`: represented or approximated, but not fully equivalent to hosted CI.
+- `unsupported`: not emulated locally.
 
-- GitHub reusable workflow jobs with `jobs.<id>.uses`.
-- GitLab `include`, `extends`, child pipelines, artifacts, cache, services, and parallel expansion.
-- Azure templates, tasks, resources, deployment jobs, job containers, services, and strategy matrix expansion.
-- Hosted runner image parity, artifacts, cache, OIDC, deployment environments, concurrency, permissions, and hosted service semantics.
+An `unsupported` workflow may still contain runnable shell steps. Unsupported action/task steps are usually reported and skipped; unsupported job-level execution models such as service containers, matrices, reusable workflows, and job containers stop that job with an error.
 
-See [docs/architecture.md](docs/architecture.md) for the implementation architecture.
+## How local execution works
+
+- Piper pulls a Docker image and creates one container per job.
+- Every step in a job runs in the same container.
+- Jobs run sequentially in dependency order; local parallel execution is not implemented.
+- Shell commands always run through `/bin/bash -lc`.
+- The repository is bind-mounted at `/workspace`.
+- A failed shell step stops the job and the entire run.
+- Recognized conditions are reported but not evaluated, and step conditions are not enforced, so conditional jobs and steps may run locally.
+- Unsupported external actions and tasks are skipped with a log notice unless they require an unsupported job execution model.
+
+> [!WARNING]
+> The bind mount is writable. Pipeline commands can modify or delete files in the opened repository. Review untrusted YAML before running it, and use a disposable worktree when appropriate.
+
+## Images and runtimes
+
+- The default image is `ubuntu:22.04`.
+- A GitLab job's `image` is used when present.
+- GitHub `actions/setup-node` and `actions/setup-dotnet` select a matching Node or .NET SDK image when Piper can map the requested version.
+- GitHub `runs-on` and Azure `pool` values are shown but do not select a hosted runner image.
+- Every selected image must contain `/bin/bash`; minimal images such as Alpine often do not.
+
+## Data and secrets
+
+The desktop app stores run metadata and masked events in a local SQLite database. The default packaged-app database is `piper.db` in Electron's per-user application-data directory. Set `PIPER_DB` before launching Piper to use another path.
+
+Run inputs, environment variables, and secrets are not written to the run record. They are passed to the job container as environment variables for the active run. Exact secret values of at least three characters are replaced in emitted logs, but masking cannot protect shorter, transformed, encoded, split, or otherwise altered values.
+
+Treat locally executed pipelines as trusted code. Containers can access the mounted repository, their configured environment, and Docker's normal network.
+
+## Documentation
+
+- [User Guide](docs/user-guide.md) — installation, interface, running pipelines, updates, data, and troubleshooting
+- [Provider Support Reference](docs/provider-support.md) — exact GitHub, GitLab, and Azure compatibility
+- [Development Guide](docs/development.md) — setup, commands, packaging, testing, and releases
+- [Architecture](docs/architecture.md) — desktop, engine, persistence, and execution design
+- [Engine API](docs/engine-api.md) — newline-delimited JSON-RPC protocol and methods
+
+## Common development commands
+
+```sh
+make install       # Install Node and Go dependencies
+make engine        # Build engine/bin/piper-engine
+make desktop       # Start Electron Forge in development mode
+make test          # Run Go tests, shared-types build, and desktop typecheck
+make dmg           # Build the engine and create a local macOS package
+make clean         # Remove generated build output and dependencies
+```
+
+## Current boundaries
+
+Piper is an MVP focused on transparent local feedback. It does not currently provide hosted runner parity, parallel jobs, artifact or cache handling, service containers, deployment environments, OIDC, provider expression evaluation, or cloud API integration.
+
+If local behavior and hosted CI disagree, hosted CI remains the source of truth.
