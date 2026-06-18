@@ -606,6 +606,7 @@ func compatibilityEvent(feature model.FeatureSupport) logs.Event {
 			"runtimeDisposition": feature.RuntimeDisposition,
 			"localBehavior":      feature.LocalBehavior, "hostedDifferences": feature.HostedDifferences,
 			"securityImplications": feature.SecurityImplications, "fallback": feature.Fallback,
+			"documentation": feature.Documentation,
 		},
 	}
 }

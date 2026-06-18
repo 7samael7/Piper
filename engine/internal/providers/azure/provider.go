@@ -224,6 +224,10 @@ func parseWorkflowJobs(root *yaml.Node) []model.Job {
 			Steps:   parseSteps(stepsNode, "jobs.pipeline"),
 			Support: model.SupportSupported,
 		}
+		if len(job.Steps) == 0 {
+			job.Features = append(job.Features, support.Ref("common.empty-job", "jobs.pipeline", azureOrigin(stepsNode)))
+			job.Support = model.SupportUnsupported
+		}
 		for _, step := range job.Steps {
 			job.Support = model.CombineSupport(job.Support, step.Support)
 		}
@@ -339,6 +343,10 @@ func parseJobsNode(node *yaml.Node, stageID string, stageIndex int, stageDepends
 		if isDeployment {
 			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
 		}
+		if len(job.Steps) == 0 {
+			job.Features = append(job.Features, support.Ref("common.empty-job", "jobs."+fullID, job.Origin))
+			job.Support = model.SupportUnsupported
+		}
 		if job.If != "" {
 			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
 		}
@@ -437,11 +445,17 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 	}
 	steps := make([]model.Step, 0, len(node.Content))
 	for index, item := range node.Content {
+		stepPath := fmt.Sprintf("%s.steps[%d]", path, index)
 		if item.Kind != yaml.MappingNode {
-			steps = append(steps, model.Step{Name: fmt.Sprintf("Step %d", index+1), Support: model.SupportUnsupported})
+			steps = append(steps, model.Step{
+				Name: fmt.Sprintf("Step %d", index+1), Support: model.SupportUnsupported,
+				Origin: azureOrigin(item),
+				Features: []model.FeatureRef{
+					support.Ref("common.empty-step", stepPath, azureOrigin(item)),
+				},
+			})
 			continue
 		}
-		stepPath := fmt.Sprintf("%s.steps[%d]", path, index)
 		step := model.Step{
 			Name:             firstNonEmpty(yamlutil.ScalarString(yamlutil.MappingValue(item, "displayName")), fmt.Sprintf("Step %d", index+1)),
 			Env:              yamlutil.StringMap(yamlutil.MappingValue(item, "env")),
@@ -450,6 +464,10 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 			ContinueOnError:  yamlutil.ScalarBool(yamlutil.MappingValue(item, "continueOnError")),
 			Origin:           &model.SourceOrigin{Line: item.Line, Column: item.Column},
 			Support:          model.SupportSupported,
+		}
+		ambiguous := azureExecutableKeyCount(item) > 1
+		if ambiguous {
+			step.Features = append(step.Features, support.Ref("common.ambiguous-step", stepPath, azureOrigin(item)))
 		}
 		if step.If != "" {
 			step.Condition = &model.ConditionSpec{Provider: model.ProviderAzure, Original: step.If, Kind: "condition"}
@@ -488,15 +506,13 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 			step.Features = append(step.Features, support.Ref("azure.checkout", stepPath+".checkout", azureOrigin(yamlutil.MappingValue(item, "checkout"))))
 		case yamlutil.HasKey(item, "task"):
 			step.Uses = yamlutil.ScalarString(yamlutil.MappingValue(item, "task"))
+			taskName := step.Uses
 			step.With = yamlutil.StringMap(yamlutil.MappingValue(item, "inputs"))
 			taskFeature := azureTaskFeature(step.Uses)
 			step.Features = append(step.Features, support.Ref(taskFeature, stepPath+".task", azureOrigin(yamlutil.MappingValue(item, "task"))))
 			normalizeAzureTask(&step)
-			if step.Run == "" && step.Support == model.SupportUnsupported {
-				step.Features = append(step.Features, support.Ref("azure.unknown-task", stepPath+".task", azureOrigin(yamlutil.MappingValue(item, "task"))))
-			}
 			if step.Name == fmt.Sprintf("Step %d", index+1) {
-				step.Name = step.Uses
+				step.Name = taskName
 			}
 		case yamlutil.HasKey(item, "template"):
 			step.Uses = yamlutil.ScalarString(yamlutil.MappingValue(item, "template"))
@@ -519,10 +535,35 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 			step.Support = model.SupportUnsupported
 			step.Features = append(step.Features, support.Ref("common.empty-step", stepPath, azureOrigin(item)))
 		}
+		if step.Run == "" && step.Uses == "" {
+			step.Features = appendUniqueAzureFeature(step.Features, support.Ref("common.empty-step", stepPath, azureOrigin(item)))
+		}
+		if ambiguous {
+			step.Support = model.SupportUnsupported
+		}
 		step.Features = append(step.Features, azureUnknownRefs(item, azureStepKeys, stepPath)...)
 		steps = append(steps, step)
 	}
 	return steps
+}
+
+func azureExecutableKeyCount(node *yaml.Node) int {
+	count := 0
+	for _, key := range []string{"bash", "script", "checkout", "task", "template", "pwsh", "powershell"} {
+		if yamlutil.HasKey(node, key) {
+			count++
+		}
+	}
+	return count
+}
+
+func appendUniqueAzureFeature(refs []model.FeatureRef, candidate model.FeatureRef) []model.FeatureRef {
+	for _, ref := range refs {
+		if ref.ID == candidate.ID && ref.Path == candidate.Path {
+			return refs
+		}
+	}
+	return append(refs, candidate)
 }
 
 func normalizeAzureTask(step *model.Step) {

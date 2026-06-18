@@ -25,7 +25,7 @@ func TestCompatibilityEventContainsSupportContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := compatibilityEvent(feature)
-	for _, key := range []string{"featureId", "provider", "support", "runtimeDisposition", "localBehavior", "hostedDifferences", "securityImplications", "fallback"} {
+	for _, key := range []string{"featureId", "provider", "support", "runtimeDisposition", "localBehavior", "hostedDifferences", "securityImplications", "fallback", "documentation"} {
 		if event.Data[key] == nil || event.Data[key] == "" {
 			t.Fatalf("missing %s in %#v", key, event.Data)
 		}

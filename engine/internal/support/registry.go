@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -99,6 +100,15 @@ func validateEntry(entry Entry) error {
 			return fmt.Errorf("%s is required", field)
 		}
 	}
+	if !regexp.MustCompile(`^[a-z]+(?:[.-][a-z0-9]+)+$`).MatchString(entry.ID) {
+		return fmt.Errorf("id %q must be a lowercase dotted feature identifier", entry.ID)
+	}
+	if !strings.HasPrefix(entry.ID, string(entry.Provider)+".") {
+		return fmt.Errorf("id %q must start with provider %q", entry.ID, entry.Provider)
+	}
+	if !regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`).MatchString(entry.Documentation) {
+		return fmt.Errorf("documentation %q must be a lowercase anchor", entry.Documentation)
+	}
 	switch entry.Provider {
 	case model.ProviderCommon, model.ProviderGitHub, model.ProviderGitLab, model.ProviderAzure:
 	default:
@@ -123,6 +133,15 @@ func validateEntry(entry Entry) error {
 	}
 	if entry.Status == model.SupportRequiresConsent && entry.RuntimeDisposition != model.RuntimeConsent {
 		return fmt.Errorf("requires-consent features must use consent disposition")
+	}
+	if entry.Status == model.SupportSupportedLocal && entry.RuntimeDisposition != model.RuntimeExecute {
+		return fmt.Errorf("supported-local features must use execute disposition")
+	}
+	if entry.Status == model.SupportEmulated && entry.RuntimeDisposition != model.RuntimeEmulate {
+		return fmt.Errorf("emulated features must use emulate disposition")
+	}
+	if entry.Status == model.SupportPartial && entry.RuntimeDisposition != model.RuntimeExecute {
+		return fmt.Errorf("partial features must use execute disposition")
 	}
 	if len(entry.RelatedTests) == 0 {
 		return fmt.Errorf("relatedTests must contain at least one test path")

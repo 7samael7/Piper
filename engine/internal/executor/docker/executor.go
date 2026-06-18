@@ -151,6 +151,24 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 	job.ID = instance.ID
 	job.Name = instance.Name
 	runtime := newRuntimeContext(request, instance, dependencies)
+	if feature, ok, err := rejectingFeature(job.Features); err != nil {
+		return scheduler.Result{Status: model.RunFailed, Error: err}
+	} else if ok {
+		emitSupportError(emit, job.ID, "", feature)
+		return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("%s: %s", feature.FeatureID, feature.Fallback)}
+	}
+	for index, step := range job.Steps {
+		stepID := step.ID
+		if stepID == "" {
+			stepID = fmt.Sprintf("step-%d", index+1)
+		}
+		if feature, ok, err := rejectingFeature(step.Features); err != nil {
+			return scheduler.Result{Status: model.RunFailed, Error: err}
+		} else if ok {
+			emitSupportError(emit, job.ID, stepID, feature)
+			return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("%s: %s", feature.FeatureID, feature.Fallback)}
+		}
+	}
 	condition := defaultJobCondition(request.Provider, dependencies)
 	if job.Condition != nil {
 		condition = *job.Condition
@@ -164,12 +182,6 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 	if !conditionResult.Value {
 		emit(systemEvent(job.ID, "", "job_skipped", model.RunSkipped, conditionResult.Reason))
 		return scheduler.Result{Status: model.RunSkipped}
-	}
-	if feature, ok, err := rejectingFeature(job.Features); err != nil {
-		return scheduler.Result{Status: model.RunFailed, Error: err}
-	} else if ok {
-		emitSupportError(emit, job.ID, "", feature)
-		return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("%s: %s", feature.FeatureID, feature.Fallback)}
 	}
 	approvalTarget := job.Environment
 	if approvalTarget == "" && job.When == "manual" {
@@ -263,12 +275,6 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 			runtime.steps[stepID] = stepRuntime{Status: model.RunSkipped}
 			continue
 		}
-		if feature, ok, guardErr := rejectingFeature(step.Features); guardErr != nil {
-			return scheduler.Result{Status: model.RunFailed, Error: guardErr}
-		} else if ok {
-			emitSupportError(emit, job.ID, stepID, feature)
-			return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("%s: %s", feature.FeatureID, feature.Fallback)}
-		}
 		emit(systemEvent(job.ID, stepID, "step_started", model.RunRunning, fmt.Sprintf("Step %s started.", step.Name)))
 
 		switch {
@@ -297,8 +303,8 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 			emit(emulationEvent(job.ID, stepID, "github.checkout", "actions/checkout is emulated because the prepared repository is already mounted."))
 		case request.Provider == model.ProviderAzure && step.Uses == "checkout":
 			emit(emulationEvent(job.ID, stepID, "azure.checkout", "Azure checkout is emulated because the prepared repository is already mounted."))
-		case request.Provider == model.ProviderGitHub && isSetupAction(step.Uses):
-			emit(systemEvent(job.ID, stepID, "step_finished", model.RunSucceeded, setupActionMessage(step, imageName)))
+		case isSetupAction(step.Uses):
+			emit(emulationEvent(job.ID, stepID, setupActionFeatureID(request.Provider), setupActionMessage(step, imageName)))
 		case e.isBuiltinAction(request.Provider, step.Uses):
 			if actionErr := e.executeBuiltinAction(request, job, step, prepared.Path, cacheScope, runtime, emit); actionErr != nil {
 				emit(systemEvent(job.ID, stepID, "step_failed", model.RunFailed, actionErr.Error()))
@@ -1094,6 +1100,20 @@ func (e *Executor) resolveActions(ctx context.Context, request model.RunRequest,
 		if err != nil {
 			return nil, err
 		}
+		if !supportedActionRuntime(action) {
+			registry, registryErr := support.Default()
+			if registryErr != nil {
+				return nil, registryErr
+			}
+			feature, resolveErr := registry.Resolve(model.FeatureRef{
+				ID: "github.unsupported-action", Path: actionFeaturePath(job, step), Origin: step.Origin,
+			})
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			emitSupportError(emit, job.ID, step.ID, feature)
+			return nil, fmt.Errorf("%s: action %s uses unsupported runtime %q", feature.FeatureID, step.Uses, action.Using)
+		}
 		result[step.Uses] = action
 		event := systemEvent(job.ID, step.ID, "action_resolved", model.RunSucceeded, fmt.Sprintf("Resolved action %s.", step.Uses))
 		event.Data = map[string]interface{}{
@@ -1390,11 +1410,46 @@ func emulationEvent(jobID, stepID, featureID, message string) logs.Event {
 
 func supportEventData(feature model.FeatureSupport) map[string]interface{} {
 	return map[string]interface{}{
-		"featureId": feature.FeatureID, "provider": feature.Provider, "status": feature.Support,
+		"featureId": feature.FeatureID, "feature": feature.Feature,
+		"provider": feature.Provider, "category": feature.Category, "status": feature.Support,
 		"runtimeDisposition": feature.RuntimeDisposition, "path": feature.Path, "origin": feature.Origin,
 		"localBehavior": feature.LocalBehavior, "hostedDifferences": feature.HostedDifferences,
 		"securityImplications": feature.SecurityImplications, "fallback": feature.Fallback,
+		"documentation": feature.Documentation,
 	}
+}
+
+func setupActionFeatureID(provider model.ProviderID) string {
+	if provider == model.ProviderAzure {
+		return "azure.task-runtime"
+	}
+	return "github.setup-runtime"
+}
+
+func supportedActionRuntime(action *actions.Action) bool {
+	if action == nil {
+		return false
+	}
+	switch action.Using {
+	case "node12", "node16", "node20", "node24", "composite":
+		return true
+	case "docker":
+		return strings.HasPrefix(action.Image, "docker://")
+	default:
+		return false
+	}
+}
+
+func actionFeaturePath(job model.Job, step model.Step) string {
+	for _, ref := range step.Features {
+		if ref.Path != "" {
+			return ref.Path
+		}
+	}
+	if step.ID != "" {
+		return "jobs." + job.ID + ".steps." + step.ID + ".uses"
+	}
+	return "jobs." + job.ID + ".steps.uses"
 }
 
 type eventWriter struct {

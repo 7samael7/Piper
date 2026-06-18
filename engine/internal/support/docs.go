@@ -18,6 +18,7 @@ func RenderProviderSupport(registry *Registry) []byte {
 	output.WriteString("Piper is a deterministic local approximation. Hosted CI remains the final source of truth.\n\n")
 	output.WriteString("Statuses: `supported-local`, `emulated`, `partial`, `validation-only`, `unsupported`, and `requires-consent`.\n\n")
 	output.WriteString("Runtime dispositions: `execute`, `emulate`, `inspect-only`, `reject`, and `consent`.\n\n")
+	fmt.Fprintf(&output, "This document is generated from %d registry records. Each row includes the parser contract, runtime behavior, hosted difference, security note, fallback, and related test evidence.\n\n", len(registry.Features))
 
 	providers := []model.ProviderID{model.ProviderCommon, model.ProviderGitHub, model.ProviderGitLab, model.ProviderAzure}
 	headings := map[model.ProviderID]string{
@@ -38,13 +39,14 @@ func RenderProviderSupport(registry *Registry) []byte {
 			}
 			return entries[i].ID < entries[j].ID
 		})
-		output.WriteString("| Category / feature | Status | Runtime | Local behavior | Hosted difference / fallback |\n")
-		output.WriteString("| --- | --- | --- | --- | --- |\n")
+		output.WriteString("| Category / feature | Status / runtime | Parser contract | Local behavior | Hosted difference | Security / fallback / tests |\n")
+		output.WriteString("| --- | --- | --- | --- | --- | --- |\n")
 		for _, entry := range entries {
-			fmt.Fprintf(&output, "| <a id=\"%s\"></a>%s — %s (`%s`) | `%s` | `%s` | %s | %s Fallback: %s |\n",
+			fmt.Fprintf(&output, "| <a id=\"%s\"></a>%s — %s (`%s`) | `%s` / `%s` | %s | %s | %s | %s Fallback: %s Tests: %s |\n",
 				entry.Documentation, titleCase(entry.Category), escapeCell(entry.Title), entry.ID,
-				entry.Status, entry.RuntimeDisposition, escapeCell(entry.LocalBehavior),
-				escapeCell(entry.HostedDifferences), escapeCell(entry.Fallback))
+				entry.Status, entry.RuntimeDisposition, escapeCell(entry.ParserSupport), escapeCell(entry.LocalBehavior),
+				escapeCell(entry.HostedDifferences), escapeCell(entry.SecurityImplications), escapeCell(entry.Fallback),
+				testLinks(entry.RelatedTests))
 		}
 		output.WriteString("\n")
 	}
@@ -74,4 +76,12 @@ func escapeCell(value string) string {
 	value = strings.ReplaceAll(value, "|", "\\|")
 	value = strings.ReplaceAll(value, "\n", " ")
 	return value
+}
+
+func testLinks(paths []string) string {
+	links := make([]string, 0, len(paths))
+	for _, path := range paths {
+		links = append(links, fmt.Sprintf("[%s](../%s)", escapeCell(path), path))
+	}
+	return strings.Join(links, ", ")
 }

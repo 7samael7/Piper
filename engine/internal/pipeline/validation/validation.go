@@ -71,8 +71,12 @@ func Validate(_ context.Context, workflow *model.Workflow) model.ValidationRepor
 
 	for jobIndex := range workflow.Jobs {
 		job := &workflow.Jobs[jobIndex]
-		job.Support = resolveRefs(job.Features)
 		jobPath := fmt.Sprintf("jobs.%s", job.ID)
+		if len(job.Steps) == 0 && job.ReusableWorkflow == "" {
+			job.Features = appendFeatureRef(job.Features, support.Ref("common.empty-job", jobPath, job.Origin))
+			addIssue(model.SeverityWarning, "job.empty", "Job has no locally executable steps.", jobPath, model.SupportUnsupported)
+		}
+		job.Support = resolveRefs(job.Features)
 		if workflow.Provider == model.ProviderGitHub && job.Runner == "" && job.ReusableWorkflow == "" {
 			addIssue(model.SeverityWarning, "job.missing_runner", "Job does not declare runs-on.", jobPath+".runs-on", model.SupportPartial)
 			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
@@ -85,8 +89,15 @@ func Validate(_ context.Context, workflow *model.Workflow) model.ValidationRepor
 		}
 		for stepIndex := range job.Steps {
 			step := &job.Steps[stepIndex]
-			step.Support = resolveRefs(step.Features)
 			stepPath := fmt.Sprintf("%s.steps[%d]", jobPath, stepIndex)
+			if step.Run == "" && step.Uses == "" {
+				step.Features = appendFeatureRef(step.Features, support.Ref("common.empty-step", stepPath, step.Origin))
+			}
+			if step.Run != "" && step.Uses != "" {
+				step.Features = appendFeatureRef(step.Features, support.Ref("common.ambiguous-step", stepPath, step.Origin))
+				addIssue(model.SeverityWarning, "step.ambiguous", "Step declares more than one executable form.", stepPath, model.SupportUnsupported)
+			}
+			step.Support = resolveRefs(step.Features)
 			if step.Condition != nil {
 				if err := expression.Validate(*step.Condition); err != nil {
 					addIssue(model.SeverityError, err.Code, err.Message, stepPath+".if", model.SupportUnsupported)
@@ -104,4 +115,13 @@ func Validate(_ context.Context, workflow *model.Workflow) model.ValidationRepor
 
 	workflow.Support = report.Support
 	return report
+}
+
+func appendFeatureRef(refs []model.FeatureRef, candidate model.FeatureRef) []model.FeatureRef {
+	for _, ref := range refs {
+		if ref.ID == candidate.ID && ref.Path == candidate.Path {
+			return refs
+		}
+	}
+	return append(refs, candidate)
 }

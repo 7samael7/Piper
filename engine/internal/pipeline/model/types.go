@@ -392,11 +392,11 @@ func supportRank(level SupportLevel) int {
 	switch level {
 	case SupportUnsupported:
 		return 5
-	case SupportValidationOnly:
-		return 4
 	case SupportRequiresConsent:
-		return 3
+		return 4
 	case SupportPartial:
+		return 3
+	case SupportValidationOnly:
 		return 2
 	case SupportEmulated:
 		return 1

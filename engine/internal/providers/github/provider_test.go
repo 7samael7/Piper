@@ -122,23 +122,54 @@ func TestEmptyAndUnknownStepsHaveStructuredFeatureReferences(t *testing.T) {
 	workflow, err := parseWorkflow(".github/workflows/invalid.yml", []byte(`
 on: push
 jobs:
+  no_steps:
+    runs-on: ubuntu-latest
   test:
     runs-on: ubuntu-latest
     steps:
+      - echo not-a-step-mapping
       - name: Empty
       - name: Unknown
         timeout-minutes: 2
+      - name: Ambiguous
+        run: echo local
+        uses: owner/action@v1
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !githubHasFeature(workflow.Jobs[0].Steps[0].Features, "common.empty-step") {
+	if !githubHasFeature(workflow.Jobs[0].Features, "common.empty-job") {
+		t.Fatal("job without steps must be explicitly unsupported")
+	}
+	if !githubHasFeature(workflow.Jobs[1].Steps[0].Features, "common.empty-step") {
+		t.Fatal("non-mapping step must be explicitly unsupported")
+	}
+	if !githubHasFeature(workflow.Jobs[1].Steps[1].Features, "common.empty-step") {
 		t.Fatal("empty step must be explicitly unsupported")
 	}
-	if !githubHasFeature(workflow.Jobs[0].Steps[1].Features, "github.unknown") {
+	if !githubHasFeature(workflow.Jobs[1].Steps[2].Features, "github.unknown") {
 		t.Fatal("unknown step key must be explicit")
 	}
-	if origin := workflow.Jobs[0].Steps[0].Features[0].Origin; origin == nil || origin.File == "" || origin.Line == 0 {
+	if !githubHasFeature(workflow.Jobs[1].Steps[3].Features, "common.ambiguous-step") {
+		t.Fatal("multiple executable forms must be rejected")
+	}
+	if origin := workflow.Jobs[1].Steps[1].Features[0].Origin; origin == nil || origin.File == "" || origin.Line == 0 {
 		t.Fatalf("missing source location: %#v", origin)
+	}
+}
+
+func TestMissingRunsOnDoesNotClaimRunnerInspectionSupport(t *testing.T) {
+	workflow, err := parseWorkflow(".github/workflows/missing-runner.yml", []byte(`
+on: push
+jobs:
+  test:
+    steps:
+      - run: echo test
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if githubHasFeature(workflow.Jobs[0].Features, "github.runner") {
+		t.Fatal("missing runs-on must not be classified as parsed runner metadata")
 	}
 }

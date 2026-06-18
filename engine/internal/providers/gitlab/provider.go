@@ -273,6 +273,10 @@ func parseJobs(root *yaml.Node, stages []string) []model.Job {
 		if job.HasStrategy || job.ReusableWorkflow != "" {
 			job.Support = model.SupportUnsupported
 		}
+		if len(job.Steps) == 0 && job.ReusableWorkflow == "" {
+			job.Features = append(job.Features, support.Ref("common.empty-job", "jobs."+id, job.Origin))
+			job.Support = model.SupportUnsupported
+		}
 		for _, step := range job.Steps {
 			job.Support = model.CombineSupport(job.Support, step.Support)
 		}
@@ -501,7 +505,11 @@ func gitlabWorkflowFeatures(root *yaml.Node) []model.FeatureRef {
 	if yamlutil.HasKey(root, "image") {
 		features = append(features, support.Ref("gitlab.image-tags", "image", gitlabOrigin(yamlutil.MappingValue(root, "image"))))
 	}
-	return append(features, gitlabCompositionFeatures(root)...)
+	if yamlutil.HasKey(root, "cache") || yamlutil.HasKey(root, "services") {
+		features = append(features, support.Ref("gitlab.unsupported-global-policy", "workflow", gitlabOrigin(root)))
+	}
+	features = append(features, gitlabCompositionFeatures(root)...)
+	return append(features, gitlabWorkflowUnknownRefs(root)...)
 }
 
 func gitlabJobFeatures(id string, body *yaml.Node) []model.FeatureRef {
@@ -601,6 +609,19 @@ func gitlabUnknownRefs(node *yaml.Node, prefix string) []model.FeatureRef {
 		if !gitlabKnownJobKeys[key.Value] {
 			result = append(result, support.Ref("gitlab.unknown", prefix+"."+key.Value, gitlabOrigin(key)))
 		}
+	}
+	return result
+}
+
+func gitlabWorkflowUnknownRefs(root *yaml.Node) []model.FeatureRef {
+	result := []model.FeatureRef{}
+	for index := 0; root != nil && index+1 < len(root.Content); index += 2 {
+		key := root.Content[index]
+		value := root.Content[index+1]
+		if gitlabReservedKeys[key.Value] || strings.HasPrefix(key.Value, ".") || value.Kind == yaml.MappingNode {
+			continue
+		}
+		result = append(result, support.Ref("gitlab.unknown", key.Value, gitlabOrigin(key)))
 	}
 	return result
 }

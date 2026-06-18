@@ -108,3 +108,27 @@ test:
 		t.Fatal("ignored job policies must be explicit")
 	}
 }
+
+func TestGitLabGlobalDefaultsAndEmptyJobsCannotSilentlySucceed(t *testing.T) {
+	workflow, err := parseWorkflow(".gitlab-ci.yml", []byte(`
+cache:
+  paths: [.cache]
+services:
+  - redis:7
+EMPTY_GLOBAL: value
+empty:
+  stage: test
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFeature(workflow.Features, "gitlab.unsupported-global-policy") {
+		t.Fatal("top-level cache/services must be explicitly rejected")
+	}
+	if !hasFeature(workflow.Features, "gitlab.unknown") {
+		t.Fatal("unknown non-job top-level key must be explicit")
+	}
+	if len(workflow.Jobs) != 1 || !hasFeature(workflow.Jobs[0].Features, "common.empty-job") {
+		t.Fatalf("empty job was not classified: %#v", workflow.Jobs)
+	}
+}

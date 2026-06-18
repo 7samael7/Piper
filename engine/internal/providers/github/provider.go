@@ -232,7 +232,8 @@ func parseJobs(node *yaml.Node, workflowEnv map[string]string) ([]model.Job, err
 		if body.Kind != yaml.MappingNode {
 			return nil, fmt.Errorf("jobs.%s must be a YAML mapping", id)
 		}
-		steps := parseSteps(mappingValue(body, "steps"))
+		jobPath := "jobs." + id
+		steps := parseSteps(mappingValue(body, "steps"), jobPath)
 		applyRunDefaults(steps, mappingValue(body, "defaults"))
 		job := model.Job{
 			ID:          id,
@@ -246,9 +247,11 @@ func parseJobs(node *yaml.Node, workflowEnv map[string]string) ([]model.Job, err
 			Steps:       steps,
 			Support:     model.SupportSupported,
 			Origin:      &model.SourceOrigin{Line: node.Content[i].Line, Column: node.Content[i].Column},
-			Features:    []model.FeatureRef{support.Ref("github.metadata", "jobs."+id, origin(node.Content[i]))},
+			Features:    []model.FeatureRef{support.Ref("github.metadata", jobPath, origin(node.Content[i]))},
 		}
-		job.Features = append(job.Features, support.Ref("github.runner", "jobs."+id+".runs-on", origin(mappingValue(body, "runs-on"))))
+		if mappingValue(body, "runs-on") != nil {
+			job.Features = append(job.Features, support.Ref("github.runner", jobPath+".runs-on", origin(mappingValue(body, "runs-on"))))
+		}
 		if mappingValue(body, "env") != nil || len(workflowEnv) > 0 {
 			job.Features = append(job.Features, support.Ref("github.env", "jobs."+id+".env", origin(mappingValue(body, "env"))))
 		}
@@ -274,6 +277,10 @@ func parseJobs(node *yaml.Node, workflowEnv map[string]string) ([]model.Job, err
 			job.ReusableWorkflow = uses
 			job.Support = model.SupportUnsupported
 			job.Features = append(job.Features, support.Ref("github.reusable-workflow", "jobs."+id+".uses", origin(mappingValue(body, "uses"))))
+		}
+		if len(job.Steps) == 0 && job.ReusableWorkflow == "" {
+			job.Features = append(job.Features, support.Ref("common.empty-job", jobPath, job.Origin))
+			job.Support = model.SupportUnsupported
 		}
 		job.HasContainer = mappingValue(body, "container") != nil
 		job.Services = parseServices(mappingValue(body, "services"))
@@ -308,17 +315,22 @@ func parseJobs(node *yaml.Node, workflowEnv map[string]string) ([]model.Job, err
 	return jobs, nil
 }
 
-func parseSteps(node *yaml.Node) []model.Step {
+func parseSteps(node *yaml.Node, jobPath string) []model.Step {
 	if node == nil || node.Kind != yaml.SequenceNode {
 		return []model.Step{}
 	}
 
 	steps := make([]model.Step, 0, len(node.Content))
 	for i, item := range node.Content {
+		stepPath := fmt.Sprintf("%s.steps[%d]", jobPath, i)
 		if item.Kind != yaml.MappingNode {
 			steps = append(steps, model.Step{
 				Name:    fmt.Sprintf("Step %d", i+1),
 				Support: model.SupportUnsupported,
+				Origin:  origin(item),
+				Features: []model.FeatureRef{
+					support.Ref("common.empty-step", stepPath, origin(item)),
+				},
 			})
 			continue
 		}
@@ -336,7 +348,10 @@ func parseSteps(node *yaml.Node) []model.Step {
 			Origin:           &model.SourceOrigin{Line: item.Line, Column: item.Column},
 			Support:          model.SupportSupported,
 		}
-		stepPath := fmt.Sprintf("steps[%d]", i)
+		ambiguous := executableKeyCount(item, "run", "uses") > 1
+		if ambiguous {
+			step.Features = append(step.Features, support.Ref("common.ambiguous-step", stepPath, origin(item)))
+		}
 		if step.Run != "" {
 			step.Features = append(step.Features, support.Ref("common.shell", stepPath+".run", origin(mappingValue(item, "run"))))
 			if containsExpression(step.Run) {
@@ -391,10 +406,23 @@ func parseSteps(node *yaml.Node) []model.Step {
 			step.Support = model.SupportUnsupported
 			step.Features = append(step.Features, support.Ref("common.empty-step", stepPath, origin(item)))
 		}
+		if ambiguous {
+			step.Support = model.SupportUnsupported
+		}
 		step.Features = append(step.Features, unknownRefs(item, githubStepKeys, stepPath, "github.unknown")...)
 		steps = append(steps, step)
 	}
 	return steps
+}
+
+func executableKeyCount(node *yaml.Node, keys ...string) int {
+	count := 0
+	for _, key := range keys {
+		if mappingValue(node, key) != nil {
+			count++
+		}
+	}
+	return count
 }
 
 func applyRunDefaults(steps []model.Step, defaults *yaml.Node) {
