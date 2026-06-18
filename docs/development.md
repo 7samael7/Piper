@@ -203,22 +203,35 @@ make engine
 npm --workspace apps/desktop run package
 ```
 
-Build makers configured for the host:
+Build the engine for the host and run the makers configured for that platform:
 
 ```sh
-make engine
-npm --workspace apps/desktop run make
+make package
 ```
 
-Build a macOS package through the Makefile:
+Platform-specific commands are:
 
 ```sh
 make dmg
+make linux
+make windows
 ```
 
-Generated output is written below `apps/desktop/out/`.
+The equivalent npm commands are:
 
-Electron Forge declares DMG, ZIP, Squirrel, DEB, and RPM makers, but the automated release workflow currently builds and publishes only macOS DMGs. Any additional platform release needs a correctly compiled and named Go engine resource plus platform-specific verification.
+```sh
+npm run desktop:make:mac
+npm run desktop:make:linux
+npm run desktop:make:windows
+```
+
+`scripts/make-desktop.mjs` cross-compiles the Go sidecar for the requested target, passes that binary to Electron Forge, and writes generated output below `apps/desktop/out/`.
+
+Run each installer maker on its native host. Linux packaging requires `fakeroot`, `dpkg`, and `rpmbuild`; Windows packaging uses Squirrel.Windows. Release artifacts are:
+
+- macOS: `.dmg` for `arm64` and `x64`.
+- Windows: Squirrel Setup `.exe` for `x64`.
+- Linux: `.deb` and `.rpm` for `x64`.
 
 ## Update configuration
 
@@ -236,10 +249,12 @@ PIPER_UPDATE_REPOSITORY=owner/repository node scripts/write-update-config.mjs
 
 The file contains the GitHub latest-release API URL and release page URL. Update URLs must use HTTPS, except loopback HTTP URLs accepted for local development.
 
-Update behavior is implemented in `apps/desktop/src/main/updates.ts`. DMG filenames should contain `arm64`/`aarch64` or `x64`/`amd64`/`x86_64` so the app can select the correct asset. A checksum asset should use:
+Update behavior is implemented in `apps/desktop/src/main/updates.ts`. Installer filenames should contain `arm64`/`aarch64` or `x64`/`amd64`/`x86_64` so the app can select the correct asset. Supported installer extensions are `.dmg`, `.exe`, `.deb`, and `.rpm`. On Linux, Piper prefers RPM on Fedora/RHEL/SUSE-family systems and DEB elsewhere.
+
+A checksum asset should use:
 
 ```text
-<dmg filename>.sha256
+<installer filename>.sha256
 ```
 
 ## Versioning
@@ -282,10 +297,12 @@ After CI succeeds, the workflow:
 
 1. Resolves and validates the version.
 2. Skips a tag that already has a GitHub Release.
-3. Builds Go engine binaries for macOS `arm64` and `amd64`.
-4. Builds architecture-specific DMGs.
-5. Creates SHA-256 files.
-6. Publishes a Git tag and GitHub Release.
+3. Builds Go engine binaries for every desktop target.
+4. Builds macOS DMGs for `arm64` and `x64`.
+5. Builds a Windows `x64` Setup executable.
+6. Builds Linux `x64` DEB and RPM packages.
+7. Creates SHA-256 files for every installer.
+8. Publishes a Git tag and GitHub Release.
 
 Prerelease versions such as `0.2.0-beta.1` are published as GitHub prereleases.
 
@@ -303,7 +320,7 @@ For notarization, also configure all three:
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `APPLE_TEAM_ID`
 
-Unsigned DMGs are produced when signing credentials are absent.
+Unsigned DMGs are produced when signing credentials are absent. Windows and Linux artifacts are currently unsigned.
 
 ## Clean generated output
 

@@ -81,8 +81,8 @@ jobs:
             echo "should_release=$SHOULD_RELEASE"
           } >> "$GITHUB_OUTPUT"
 
-  build:
-    name: Build DMG (${{ matrix.arch }})
+  build-macos:
+    name: Build macOS DMG (${{ matrix.arch }})
     needs: prepare
     if: ${{ needs.prepare.outputs.should_release == 'true' }}
     runs-on: macos-14
@@ -165,26 +165,12 @@ jobs:
           PIPER_UPDATE_REPOSITORY: ${{ github.repository }}
         run: node scripts/write-update-config.mjs
 
-      - name: Build engine
-        env:
-          ARCH: ${{ matrix.arch }}
-        run: |
-          if [[ "$ARCH" == "arm64" ]]; then
-            GO_ARCH="arm64"
-          else
-            GO_ARCH="amd64"
-          fi
-          (
-            cd engine
-            CGO_ENABLED=0 GOOS=darwin GOARCH="$GO_ARCH" go build -trimpath -ldflags="-s -w" -o bin/piper-engine ./cmd/daemon
-          )
-
       - name: Build DMG
         env:
           ARCH: ${{ matrix.arch }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          npm --workspace apps/desktop run make -- --platform=darwin --arch="$ARCH"
+          node scripts/make-desktop.mjs darwin "$ARCH"
 
           mkdir -p release
           DMG_SOURCE="$(find apps/desktop/out/make -type f -name '*.dmg' -print -quit)"
@@ -202,15 +188,156 @@ jobs:
           path: release/*
           if-no-files-found: error
 
+  build-linux:
+    name: Build Linux packages (x64)
+    needs: prepare
+    if: ${{ needs.prepare.outputs.should_release == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.target_sha }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes fakeroot rpm
+
+      - name: Set release version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node scripts/set-version.mjs "$VERSION"
+          npm install --package-lock-only --ignore-scripts
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks
+        run: |
+          (cd engine && go test ./...)
+          npm --workspace packages/shared-types run build
+          npm --workspace apps/desktop run typecheck
+
+      - name: Configure update endpoint
+        env:
+          PIPER_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: node scripts/write-update-config.mjs
+
+      - name: Build DEB and RPM
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node scripts/make-desktop.mjs linux x64
+
+          mkdir -p release
+          DEB_SOURCE="$(find apps/desktop/out/make -type f -name '*.deb' -print -quit)"
+          RPM_SOURCE="$(find apps/desktop/out/make -type f -name '*.rpm' -print -quit)"
+          test -n "$DEB_SOURCE"
+          test -n "$RPM_SOURCE"
+
+          DEB_NAME="Piper-${VERSION}-x64.deb"
+          RPM_NAME="Piper-${VERSION}-x64.rpm"
+          cp "$DEB_SOURCE" "release/$DEB_NAME"
+          cp "$RPM_SOURCE" "release/$RPM_NAME"
+          (
+            cd release
+            sha256sum "$DEB_NAME" > "$DEB_NAME.sha256"
+            sha256sum "$RPM_NAME" > "$RPM_NAME.sha256"
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: piper-linux-x64
+          path: release/*
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows installer (x64)
+    needs: prepare
+    if: ${{ needs.prepare.outputs.should_release == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.target_sha }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set release version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node scripts/set-version.mjs "$env:VERSION"
+          npm install --package-lock-only --ignore-scripts
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Go tests
+        working-directory: engine
+        run: go test ./...
+
+      - name: Run desktop checks
+        run: |
+          npm --workspace packages/shared-types run build
+          npm --workspace apps/desktop run typecheck
+
+      - name: Configure update endpoint
+        env:
+          PIPER_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: node scripts/write-update-config.mjs
+
+      - name: Build Setup executable
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node scripts/make-desktop.mjs win32 x64
+
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $source = Get-ChildItem -Path apps/desktop/out/make -Filter "*Setup.exe" -Recurse | Select-Object -First 1
+          if (-not $source) {
+            throw "Squirrel Setup executable was not generated."
+          }
+          $name = "Piper-$env:VERSION-x64-Setup.exe"
+          $destination = Join-Path release $name
+          Copy-Item $source.FullName $destination
+          $checksum = (Get-FileHash -Algorithm SHA256 $destination).Hash.ToLower()
+          "$checksum  $name" | Set-Content -Encoding ascii "$destination.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: piper-windows-x64
+          path: release/*
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
-    needs: [prepare, build]
+    needs: [prepare, build-macos, build-linux, build-windows]
     if: ${{ needs.prepare.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: piper-dmg-*
+          pattern: piper-*
           path: release
           merge-multiple: true
 

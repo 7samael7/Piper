@@ -21,17 +21,19 @@ Open a repository, choose GitHub Actions, GitLab CI/CD, or Azure Pipelines, and 
 - Streams stdout, stderr, lifecycle events, and compatibility notices.
 - Masks supplied secret values in emitted logs.
 - Stores local run summaries and events in SQLite.
-- Checks GitHub Releases for architecture-matching macOS updates.
+- Checks GitHub Releases for an installer matching the current operating system and architecture.
 
 ## Install
 
-### macOS release
-
-Automated releases currently publish DMGs for Apple Silicon (`arm64`) and Intel (`x64`) Macs:
-
 [Download the latest Piper release](https://github.com/7samael7/Piper/releases/latest)
 
-Some releases may be unsigned. macOS can warn about an unsigned application; only bypass Gatekeeper if you trust the downloaded build and its source.
+Automated releases publish:
+
+- macOS DMGs for Apple Silicon (`arm64`) and Intel (`x64`).
+- A Windows Squirrel Setup executable for `x64`.
+- Linux packages for `x64` in Debian/Ubuntu (`.deb`) and Fedora/RHEL (`.rpm`) formats.
+
+Some releases may be unsigned. macOS Gatekeeper and Windows SmartScreen can warn about unsigned applications; only bypass an operating-system warning if you trust the downloaded build and its source.
 
 ### Run from source
 
@@ -171,6 +173,8 @@ make engine        # Build engine/bin/piper-engine
 make desktop       # Start Electron Forge in development mode
 make test          # Run Go tests, shared-types build, and desktop typecheck
 make dmg           # Build the engine and create a local macOS package
+make linux         # Create x64 DEB and RPM packages on Linux
+make windows       # Create an x64 Setup executable on Windows
 make clean         # Remove generated build output and dependencies
 ```
 

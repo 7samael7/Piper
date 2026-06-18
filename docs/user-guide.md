@@ -24,6 +24,19 @@ Download the DMG matching your Mac from [GitHub Releases](https://github.com/7sa
 
 Open the DMG and move Piper into Applications. Some builds may be unsigned and trigger a Gatekeeper warning.
 
+### Windows
+
+Download `Piper-<version>-x64-Setup.exe` from [GitHub Releases](https://github.com/7samael7/Piper/releases/latest) and run it. Windows SmartScreen may warn when a build is unsigned.
+
+### Linux
+
+Download the `x64` package for your distribution:
+
+- Debian, Ubuntu, Mint, and related distributions: `.deb`.
+- Fedora, RHEL, Rocky Linux, AlmaLinux, openSUSE, and related distributions: `.rpm`.
+
+Install it with your graphical package manager or the distribution's normal package command.
+
 ### From source
 
 Install Node.js 24 (the primary CI baseline), npm, and Go 1.25+. Then:
@@ -317,14 +330,14 @@ The standalone Go engine uses `~/.piper/piper.db` when `PIPER_DB` is not set. Th
 
 ## Updates
 
-Packaged macOS builds check the configured GitHub repository for a newer release at startup. Use the refresh icon in the lower-left corner to check again.
+Packaged macOS, Windows, and Linux builds check the configured GitHub repository for a newer release at startup. Use the refresh icon in the lower-left corner to check again.
 
 When an update is available, Piper:
 
-1. Selects the DMG matching the current architecture.
+1. Selects the installer matching the current operating system and architecture.
 2. Downloads it to the user's Downloads directory.
 3. Verifies the accompanying SHA-256 checksum when one is published.
-4. Opens the DMG.
+4. Opens the installer with the operating system.
 
 Piper does not silently install or replace the running app.
 
@@ -334,7 +347,7 @@ For a private release repository, launch Piper with a fine-grained GitHub token 
 PIPER_UPDATE_TOKEN=github_pat_... /Applications/Piper.app/Contents/MacOS/Piper
 ```
 
-The update UI is currently unavailable on Windows and Linux.
+On Windows or Linux, set the same environment variable before launching Piper using that platform's normal shell syntax.
 
 ## Troubleshooting
 

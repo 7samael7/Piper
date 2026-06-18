@@ -214,7 +214,7 @@ export function App() {
               title={updateQuery.data.message}
             >
               <Download size={14} />
-              Install v{updateQuery.data.latestVersion}
+              Download v{updateQuery.data.latestVersion}
             </button>
           ) : (
             <button

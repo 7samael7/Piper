@@ -156,15 +156,15 @@ The current renderer requests the 25 newest run summaries for the open repositor
 
 ## Update architecture
 
-The update service is owned by the Electron main process and currently supports macOS DMG releases:
+The update service is owned by the Electron main process and supports macOS, Windows, and Linux release installers:
 
 1. Read `apps/desktop/update-config.json` from application resources.
 2. Query the configured GitHub latest-release API.
 3. Compare semantic versions.
-4. Select the DMG matching `process.arch`.
-5. Download the DMG and optional `.sha256` file.
+4. Select the platform package matching `process.platform` and `process.arch`.
+5. Download the installer and optional `.sha256` file.
 6. Verify SHA-256 when a checksum is available.
-7. Move the DMG to the user's Downloads directory and open it.
+7. Move the installer to the user's Downloads directory and open it.
 
 The app does not silently replace itself. Private repositories can provide `PIPER_UPDATE_TOKEN` when launching Piper.
 
