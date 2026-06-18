@@ -1,0 +1,19 @@
+node_modules/
+
+# Electron Forge and Vite output
+apps/desktop/.vite/
+apps/desktop/out/
+
+# TypeScript package output
+packages/shared-types/dist/
+
+# Go build output and local databases
+engine/bin/
+*.db
+*.db-shm
+*.db-wal
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/

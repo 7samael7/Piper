@@ -1,0 +1,33 @@
+stages:
+  - build
+  - test
+  - deploy
+
+image: alpine:3.20
+
+variables:
+  APP_ENV: local
+
+build:
+  stage: build
+  script:
+    - echo "Building from $CI_PROJECT_DIR"
+    - echo "Event source: $CI_PIPELINE_SOURCE"
+
+test:
+  stage: test
+  needs:
+    - build
+  script:
+    - echo "Running tests"
+    - echo "APP_ENV=$APP_ENV"
+
+deploy:
+  stage: deploy
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  artifacts:
+    paths:
+      - dist
+  script:
+    - echo "Deploy is visible but artifacts are unsupported locally"

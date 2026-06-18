@@ -1,0 +1,14 @@
+{
+  "name": "pipeline-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "desktop": "npm --workspace apps/desktop run start",
+    "desktop:build": "npm --workspace apps/desktop run package",
+    "shared:build": "npm --workspace packages/shared-types run build"
+  }
+}

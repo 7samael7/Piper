@@ -1,0 +1,37 @@
+name: local-ci
+
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  CONFIGURATION: Debug
+
+stages:
+  - stage: Build
+    jobs:
+      - job: compile
+        displayName: Compile
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+          - bash: |
+              echo "Building from $BUILD_SOURCESDIRECTORY"
+              echo "Reason: $BUILD_REASON"
+
+  - stage: Test
+    jobs:
+      - job: unit
+        displayName: Unit Tests
+        steps:
+          - script: |
+              echo "Running unit tests"
+              echo "CONFIGURATION=$CONFIGURATION"
+
+      - job: publish
+        displayName: Publish Artifact Placeholder
+        dependsOn: unit
+        steps:
+          - task: PublishBuildArtifacts@1

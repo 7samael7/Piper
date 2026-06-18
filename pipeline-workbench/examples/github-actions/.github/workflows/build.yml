@@ -1,0 +1,34 @@
+name: Example Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      greeting:
+        description: Message to print
+        required: false
+        default: Hello from Pipeline Workbench
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print environment
+        run: |
+          echo "Repository is mounted at $GITHUB_WORKSPACE"
+          echo "Greeting: $INPUT_GREETING"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [lint]
+    env:
+      NODE_ENV: test
+    steps:
+      - name: Run test placeholder
+        run: |
+          echo "Running local CI test step"
+          echo "NODE_ENV=$NODE_ENV"
