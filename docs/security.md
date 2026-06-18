@@ -11,5 +11,6 @@ Pipeline definitions and downloaded actions are untrusted code.
 - Secrets are exact-value masked in messages, logs, and structured event data. Encoded or transformed secrets may still escape masking.
 - Mock OIDC is disabled by default. Its token begins with `PIPER_MOCK_OIDC`, uses an invalid provider issuer, and includes `piper_mock=true`.
 - Remote includes, real cloud identity, cloud artifact backends, and unrestricted host mounts are not silently emulated.
+- Registry entries with a `reject` runtime disposition fail through a structured `support_error`; unknown executable syntax is never treated as success.
 
 Use an isolated workspace and disabled network access when inspecting code you do not trust.

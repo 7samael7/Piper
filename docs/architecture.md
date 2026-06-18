@@ -77,6 +77,7 @@ Core packages:
 - `internal/expression`: provider-aware condition parsing, evaluation, and interpolation.
 - `internal/pipeline/graph`: logical and expanded graph construction.
 - `internal/pipeline/validation`: blocking validation and feature support classification.
+- `internal/support`: embedded feature registry, six-state aggregation, runtime dispositions, generated documentation, and contract tests.
 - `internal/providers/github`: GitHub Actions discovery and parsing.
 - `internal/providers/gitlab`: GitLab CI/CD discovery and parsing.
 - `internal/providers/azure`: Azure Pipelines discovery and parsing.
@@ -129,6 +130,8 @@ sequenceDiagram
 ```
 
 `run.start` is asynchronous. The request returns a run ID after validation and persistence; execution continues in a goroutine. A cancellation request invokes the run's `context.CancelFunc`, and the Docker executor kills the active job container if a step is running.
+
+Provider adapters emit stable feature references with paths and source locations. Validation resolves them through the support registry. The same resolved records drive badges, API capabilities, compatibility events, generated documentation, consent requirements, emulation notices, and runtime rejection.
 
 ## Execution model
 

@@ -329,3 +329,14 @@ make clean
 ```
 
 This removes Node dependencies and generated Electron, TypeScript, and engine build output. It does not remove source files or the user's application-data database.
+## Support contract
+
+`engine/internal/support/registry.json` is the source of truth for feature support. After an intentional registry change:
+
+```sh
+cd engine
+go run ./cmd/supportdoc -write
+go test ./internal/support
+```
+
+Review and update `internal/support/testdata/contract.sha256` only when the status/runtime contract change is intentional.

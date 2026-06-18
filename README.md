@@ -105,7 +105,7 @@ Default event names are:
 | GitLab CI/CD | `web` |
 | Azure Pipelines | `manual` |
 
-The event name configures local environment variables such as `GITHUB_EVENT_NAME`, `CI_PIPELINE_SOURCE`, or `BUILD_REASON`. It does not evaluate the provider's trigger or condition rules.
+The event name configures local variables such as `GITHUB_EVENT_NAME`, `CI_PIPELINE_SOURCE`, or `BUILD_REASON` and feeds supported job/step conditions. It does not prove that the hosted provider would trigger the pipeline.
 
 ## Provider discovery
 
@@ -121,11 +121,14 @@ All three providers support YAML inspection, graph construction, validation, and
 
 Piper labels workflows, jobs, steps, and individual features:
 
-- `supported`: implemented for local use.
-- `partial`: represented or approximated, but not fully equivalent to hosted CI.
-- `unsupported`: not emulated locally.
+- `supported-local`: implemented for Piper's local model.
+- `emulated`: deterministic local substitute with documented hosted differences.
+- `partial`: executable or represented with missing semantics.
+- `validation-only`: inspected but never allowed to affect execution.
+- `requires-consent`: remote code that cannot run without explicit approval.
+- `unsupported`: rejected rather than silently skipped.
 
-An `unsupported` workflow may still contain runnable shell steps. Unsupported actions and tasks fail visibly; unsupported job-level execution models such as reusable workflows and custom job containers stop that job with an error.
+Support classifications come from the machine-readable registry used by validation, events, badges, and the generated provider reference. Unsupported executable behavior produces a structured error.
 
 ## How local execution works
 
@@ -162,7 +165,8 @@ Treat locally executed pipelines as trusted code. Containers can access the moun
 ## Documentation
 
 - [User Guide](docs/user-guide.md) — installation, interface, running pipelines, updates, data, and troubleshooting
-- [Provider Support Reference](docs/provider-support.md) — exact GitHub, GitLab, and Azure compatibility
+- [Provider Support Reference](docs/provider-support.md) — generated GitHub, GitLab, and Azure compatibility contract
+- [Phase 0 Audit](docs/audits/phase-0-feature-support-audit.md) — evidence, contradictions, risks, and test gaps
 - [Development Guide](docs/development.md) — setup, commands, packaging, testing, and releases
 - [Architecture](docs/architecture.md) — desktop, engine, persistence, and execution design
 - [Engine API](docs/engine-api.md) — newline-delimited JSON-RPC protocol and methods
@@ -184,6 +188,6 @@ make clean         # Remove generated build output and dependencies
 
 ## Current boundaries
 
-Piper remains a local approximation. It supports common conditions, matrices, parallel jobs, service containers, local artifacts/caches, selected actions/tasks, deployment approval simulation, and clearly marked mock OIDC. Hosted tool caches, cloud artifact backends, real identity federation, reusable workflows, every marketplace action, and full template-language parity remain outside the local model.
+Piper remains a local approximation. Consult the generated support reference for the exact parser and runtime contract; no parsed key should be assumed executable merely because it appears in the graph or inspector.
 
 If local behavior and hosted CI disagree, hosted CI remains the source of truth.

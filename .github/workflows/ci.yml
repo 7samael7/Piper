@@ -28,6 +28,7 @@ jobs:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
       - run: go test ./...
+      - run: go run ./cmd/supportdoc -check
 
   desktop-tests:
     name: Desktop checks

@@ -258,6 +258,7 @@ Event types, grouped by category:
 - Run lifecycle: `run_started`, `run_finished`, `run_failed`, `run_cancelled`.
 - Job lifecycle: `job_started`, `job_status`, `job_finished`, `job_skipped`, `job_failure_allowed`.
 - Step lifecycle: `step_started`, `step_log`, `step_finished`, `step_failed`, `step_skipped`, `step_unsupported`, `step_continued`.
+- Support lifecycle: `support_feature`, `support_error`, and `step_emulated`. Support payloads include `featureId`, provider, status, runtime disposition, source path/location, local behavior, hosted differences, security implications, and fallback.
 - Conditions: `condition_evaluated`, `condition_evaluation_error`.
 - Support and compatibility: `support_notice`, `support_feature`, `security_warning`.
 - Actions and images: `action_resolved`, `image_pull`.
