@@ -648,7 +648,7 @@ button {
   text-transform: uppercase;
 }
 
-.support-supported,
+.support-supported-local,
 .status-succeeded {
   border: 1px solid #79a783;
   background: #e7f5e8;
@@ -670,6 +670,24 @@ button {
   border: 1px solid #d9897f;
   background: #fff0ed;
   color: #9a3026;
+}
+
+.support-emulated {
+  border: 1px solid #86efac;
+  color: #17613a;
+  background: #dcfce7;
+}
+
+.support-validation-only {
+  border: 1px solid #fcd34d;
+  color: #5b3a00;
+  background: #fef3c7;
+}
+
+.support-requires-consent {
+  border: 1px solid #c4b5fd;
+  color: #5b21b6;
+  background: #ede9fe;
 }
 
 .flow-node {
@@ -706,7 +724,7 @@ button {
   opacity: 0.62;
 }
 
-.support-node-supported {
+.support-node-supported-local {
   border-color: #6ea47d;
   background: #eff8ee;
 }
@@ -719,6 +737,18 @@ button {
 .support-node-unsupported {
   border-color: #ce7a70;
   background: #fff2ef;
+}
+
+.support-node-emulated {
+  border-color: #22c55e;
+}
+
+.support-node-validation-only {
+  border-color: #eab308;
+}
+
+.support-node-requires-consent {
+  border-color: #8b5cf6;
 }
 
 .empty-state {

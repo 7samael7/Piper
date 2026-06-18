@@ -13,6 +13,7 @@ import (
 	"github.com/7samael7/Piper/engine/internal/pipeline/plan"
 	"github.com/7samael7/Piper/engine/internal/pipeline/validation"
 	"github.com/7samael7/Piper/engine/internal/providers/yamlutil"
+	"github.com/7samael7/Piper/engine/internal/support"
 	"github.com/7samael7/Piper/engine/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -87,16 +88,23 @@ func (p *Provider) Load(ctx context.Context, repoPath, workflowPath string) (*mo
 	}
 	workflow.RawYAML = string(content)
 	workflow.ResolvedYAML = string(resolvedContent)
+	if originalRoot, rootErr := yamlutil.RootMapping(content); rootErr == nil {
+		workflow.Features = append(workflow.Features, gitlabCompositionFeatures(originalRoot)...)
+	}
+	model.ApplySourceFile(workflow, filepath.ToSlash(cleanPath))
 	workflow.Graph = graph.Build(workflow)
 	workflow.Validation = p.Validate(ctx, workflow)
 	workflow.Valid = workflow.Validation.Valid
 	workflow.Support = workflow.Validation.Support
+	workflow.Graph = graph.Build(workflow)
 	if workflow.Valid {
-		if executionPlan, compileErr := plan.Compile(workflow, plan.DefaultMaxExpandedJobs, plan.DefaultConcurrency); compileErr == nil {
-			workflow.ExecutionPlan = executionPlan
-			workflow.Graph = graph.BuildExecutionPlan(executionPlan)
-			workflow.JobCount = len(executionPlan.Jobs)
+		executionPlan, compileErr := plan.Compile(workflow, plan.DefaultMaxExpandedJobs, plan.DefaultConcurrency)
+		if compileErr != nil {
+			return nil, content, compileErr
 		}
+		workflow.ExecutionPlan = executionPlan
+		workflow.Graph = graph.BuildExecutionPlan(executionPlan)
+		workflow.JobCount = len(executionPlan.Jobs)
 	}
 	return workflow, content, nil
 }
@@ -124,10 +132,11 @@ func parseWorkflow(path string, content []byte) (*model.Workflow, error) {
 			Valid:    true,
 			Support:  model.SupportSupported,
 		},
-		RawYAML:     string(content),
-		Jobs:        jobs,
-		Unsupported: workflowUnsupported(root),
+		RawYAML:  string(content),
+		Jobs:     jobs,
+		Features: gitlabWorkflowFeatures(root),
 	}
+	model.ApplySourceFile(workflow, path)
 	return workflow, nil
 }
 
@@ -236,6 +245,16 @@ func parseJobs(root *yaml.Node, stages []string) []model.Job {
 			When:         yamlutil.ScalarString(yamlutil.MappingValue(body, "when")),
 			Environment:  gitlabEnvironment(yamlutil.MappingValue(body, "environment")),
 			Origin:       &model.SourceOrigin{Line: root.Content[i].Line, Column: root.Content[i].Column},
+			Features:     []model.FeatureRef{support.Ref("gitlab.metadata", "jobs."+id, gitlabOrigin(root.Content[i]))},
+		}
+		if yamlutil.MappingValue(body, "variables") != nil || len(globalVariables) > 0 {
+			job.Features = append(job.Features, support.Ref("gitlab.variables", "jobs."+id+".variables", gitlabOrigin(yamlutil.MappingValue(body, "variables"))))
+		}
+		if yamlutil.MappingValue(body, "image") != nil || image != "" || yamlutil.MappingValue(body, "tags") != nil {
+			job.Features = append(job.Features, support.Ref("gitlab.image-tags", "jobs."+id, gitlabOrigin(body)))
+		}
+		if job.If != "" {
+			job.Features = append(job.Features, support.Ref("gitlab.rules", "jobs."+id, gitlabOrigin(body)))
 		}
 		if job.If != "" {
 			job.Condition = &model.ConditionSpec{Provider: model.ProviderGitLab, Original: job.If, Kind: "rules"}
@@ -250,12 +269,13 @@ func parseJobs(root *yaml.Node, stages []string) []model.Job {
 		} else if triggerNode := yamlutil.MappingValue(body, "trigger"); triggerNode != nil {
 			job.ReusableWorkflow = yamlutil.YAMLToString(triggerNode)
 		}
-		job.Unsupported = gitlabJobUnsupported(id, body)
+		job.Features = append(job.Features, gitlabJobFeatures(id, body)...)
 		if job.HasStrategy || job.ReusableWorkflow != "" {
 			job.Support = model.SupportUnsupported
 		}
-		for _, feature := range job.Unsupported {
-			job.Support = model.CombineSupport(job.Support, feature.Support)
+		if len(job.Steps) == 0 && job.ReusableWorkflow == "" {
+			job.Features = append(job.Features, support.Ref("common.empty-job", "jobs."+id, job.Origin))
+			job.Support = model.SupportUnsupported
 		}
 		for _, step := range job.Steps {
 			job.Support = model.CombineSupport(job.Support, step.Support)
@@ -323,6 +343,10 @@ func gitlabSteps(globalBefore, jobBefore, script, jobAfter, globalAfter string) 
 			Name:    name,
 			Run:     run,
 			Support: support,
+			Features: []model.FeatureRef{
+				supportpkgRef("gitlab.scripts", "script"),
+				supportpkgRef("common.shell", "script"),
+			},
 		})
 	}
 	addRun("before_script", globalBefore, model.SupportPartial)
@@ -467,59 +491,148 @@ func gitlabEnvironment(node *yaml.Node) string {
 	return yamlutil.ScalarString(node)
 }
 
-func workflowUnsupported(root *yaml.Node) []model.FeatureSupport {
-	features := []model.FeatureSupport{}
-	if yamlutil.HasKey(root, "include") {
-		features = append(features, unsupported("GitLab include", "include", model.SupportUnsupported, "GitLab include files are reported but not resolved by the MVP parser."))
-	}
+func gitlabWorkflowFeatures(root *yaml.Node) []model.FeatureRef {
+	features := []model.FeatureRef{support.Ref("gitlab.metadata", "workflow", gitlabOrigin(root))}
 	if yamlutil.HasKey(root, "workflow") {
-		features = append(features, unsupported("GitLab workflow rules", "workflow", model.SupportPartial, "Workflow rules are shown but not fully evaluated locally."))
+		features = append(features, support.Ref("gitlab.workflow-rules", "workflow", gitlabOrigin(yamlutil.MappingValue(root, "workflow"))))
 	}
 	if yamlutil.HasKey(root, "default") {
-		features = append(features, unsupported("GitLab default", "default", model.SupportPartial, "Default image is applied, but other default keys are not fully expanded."))
+		features = append(features, support.Ref("gitlab.default", "default", gitlabOrigin(yamlutil.MappingValue(root, "default"))))
 	}
-	return features
+	if yamlutil.HasKey(root, "variables") {
+		features = append(features, support.Ref("gitlab.variables", "variables", gitlabOrigin(yamlutil.MappingValue(root, "variables"))))
+	}
+	if yamlutil.HasKey(root, "image") {
+		features = append(features, support.Ref("gitlab.image-tags", "image", gitlabOrigin(yamlutil.MappingValue(root, "image"))))
+	}
+	if yamlutil.HasKey(root, "cache") || yamlutil.HasKey(root, "services") {
+		features = append(features, support.Ref("gitlab.unsupported-global-policy", "workflow", gitlabOrigin(root)))
+	}
+	features = append(features, gitlabCompositionFeatures(root)...)
+	return append(features, gitlabWorkflowUnknownRefs(root)...)
 }
 
-func gitlabJobUnsupported(id string, body *yaml.Node) []model.FeatureSupport {
+func gitlabJobFeatures(id string, body *yaml.Node) []model.FeatureRef {
 	path := "jobs." + id
-	features := []model.FeatureSupport{}
+	features := []model.FeatureRef{}
 	if yamlutil.HasKey(body, "extends") {
-		features = append(features, unsupported("GitLab extends", path+".extends", model.SupportUnsupported, "Job extends/templates are not resolved locally."))
+		features = append(features, support.Ref("gitlab.extends", path+".extends", gitlabOrigin(yamlutil.MappingValue(body, "extends"))))
 	}
 	if yamlutil.HasKey(body, "services") {
-		features = append(features, unsupported("GitLab services", path+".services", model.SupportSupported, "Service containers run on an isolated per-job Docker network."))
+		features = append(features, support.Ref("gitlab.services", path+".services", gitlabOrigin(yamlutil.MappingValue(body, "services"))))
 	}
 	if yamlutil.HasKey(body, "parallel") {
-		features = append(features, unsupported("GitLab parallel", path+".parallel", model.SupportUnsupported, "Parallel and matrix expansion are not implemented in the MVP."))
+		features = append(features, support.Ref("gitlab.parallel", path+".parallel", gitlabOrigin(yamlutil.MappingValue(body, "parallel"))))
 	}
 	if yamlutil.HasKey(body, "trigger") {
-		features = append(features, unsupported("GitLab child pipeline", path+".trigger", model.SupportUnsupported, "Child and multi-project pipelines are reported but not executed locally."))
+		features = append(features, support.Ref("gitlab.child-pipeline", path+".trigger", gitlabOrigin(yamlutil.MappingValue(body, "trigger"))))
 	}
 	for _, key := range []string{"dependencies", "resource_group", "coverage", "retry", "timeout"} {
 		if yamlutil.HasKey(body, key) {
-			features = append(features, unsupported("GitLab "+key, path+"."+key, model.SupportUnsupported, "This GitLab job feature is not emulated by the MVP executor."))
+			features = append(features, support.Ref("gitlab.unsupported-job-policy", path+"."+key, gitlabOrigin(yamlutil.MappingValue(body, key))))
 		}
 	}
 	for _, key := range []string{"artifacts", "cache"} {
 		if yamlutil.HasKey(body, key) {
-			features = append(features, unsupported("GitLab "+key, path+"."+key, model.SupportPartial, "This feature uses Piper-managed local storage."))
+			features = append(features, support.Ref("gitlab.artifacts-cache", path+"."+key, gitlabOrigin(yamlutil.MappingValue(body, key))))
 		}
 	}
-	if yamlutil.HasKey(body, "environment") {
-		features = append(features, unsupported("GitLab environment", path+".environment", model.SupportPartial, "Deployment approval is simulated locally."))
+	if yamlutil.HasKey(body, "environment") || yamlutil.ScalarString(yamlutil.MappingValue(body, "when")) == "manual" {
+		features = append(features, support.Ref("gitlab.environment-manual", path, gitlabOrigin(body)))
 	}
 	if yamlutil.HasKey(body, "allow_failure") {
-		features = append(features, unsupported("GitLab allow_failure", path+".allow_failure", model.SupportPartial, "allow_failure is displayed but does not change local run conclusions."))
+		features = append(features, support.Ref("gitlab.allow-failure", path+".allow_failure", gitlabOrigin(yamlutil.MappingValue(body, "allow_failure"))))
 	}
+	features = append(features, gitlabUnknownRefs(body, path)...)
 	return features
 }
 
-func unsupported(feature, path string, support model.SupportLevel, message string) model.FeatureSupport {
-	return model.FeatureSupport{
-		Feature: feature,
-		Path:    path,
-		Support: support,
-		Message: message,
+func gitlabCompositionFeatures(root *yaml.Node) []model.FeatureRef {
+	result := []model.FeatureRef{}
+	include := yamlutil.MappingValue(root, "include")
+	if include != nil {
+		local, remote := classifyIncludes(include)
+		if local {
+			result = append(result, support.Ref("gitlab.include-local", "include", gitlabOrigin(include)))
+		}
+		if remote {
+			result = append(result, support.Ref("gitlab.include-remote", "include", gitlabOrigin(include)))
+		}
 	}
+	for index := 0; root != nil && index+1 < len(root.Content); index += 2 {
+		id := root.Content[index].Value
+		body := root.Content[index+1]
+		if gitlabReservedKeys[id] || body.Kind != yaml.MappingNode || !yamlutil.HasKey(body, "extends") {
+			continue
+		}
+		result = append(result, support.Ref("gitlab.extends", "jobs."+id+".extends", gitlabOrigin(yamlutil.MappingValue(body, "extends"))))
+	}
+	return result
+}
+
+func classifyIncludes(node *yaml.Node) (local, remote bool) {
+	if node == nil {
+		return false, false
+	}
+	items := node.Content
+	if node.Kind != yaml.SequenceNode {
+		items = []*yaml.Node{node}
+	}
+	for _, item := range items {
+		switch item.Kind {
+		case yaml.ScalarNode:
+			local = true
+		case yaml.MappingNode:
+			if yamlutil.HasKey(item, "local") {
+				local = true
+			} else {
+				remote = true
+			}
+		}
+	}
+	return
+}
+
+var gitlabKnownJobKeys = map[string]bool{
+	"stage": true, "needs": true, "image": true, "tags": true, "variables": true,
+	"before_script": true, "script": true, "after_script": true, "rules": true,
+	"only": true, "except": true, "services": true, "artifacts": true, "cache": true,
+	"parallel": true, "trigger": true, "dependencies": true, "resource_group": true,
+	"coverage": true, "retry": true, "timeout": true, "environment": true,
+	"allow_failure": true, "when": true, "extends": true,
+}
+
+func gitlabUnknownRefs(node *yaml.Node, prefix string) []model.FeatureRef {
+	result := []model.FeatureRef{}
+	for index := 0; node != nil && index+1 < len(node.Content); index += 2 {
+		key := node.Content[index]
+		if !gitlabKnownJobKeys[key.Value] {
+			result = append(result, support.Ref("gitlab.unknown", prefix+"."+key.Value, gitlabOrigin(key)))
+		}
+	}
+	return result
+}
+
+func gitlabWorkflowUnknownRefs(root *yaml.Node) []model.FeatureRef {
+	result := []model.FeatureRef{}
+	for index := 0; root != nil && index+1 < len(root.Content); index += 2 {
+		key := root.Content[index]
+		value := root.Content[index+1]
+		if gitlabReservedKeys[key.Value] || strings.HasPrefix(key.Value, ".") || value.Kind == yaml.MappingNode {
+			continue
+		}
+		result = append(result, support.Ref("gitlab.unknown", key.Value, gitlabOrigin(key)))
+	}
+	return result
+}
+
+func gitlabOrigin(node *yaml.Node) *model.SourceOrigin {
+	if node == nil {
+		return nil
+	}
+	return &model.SourceOrigin{Line: node.Line, Column: node.Column}
+}
+
+func supportpkgRef(id, path string) model.FeatureRef {
+	return support.Ref(id, path, nil)
 }

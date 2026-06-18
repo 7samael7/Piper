@@ -1,6 +1,13 @@
 export type ProviderID = "github" | "gitlab" | "azure";
 
-export type SupportLevel = "supported" | "partial" | "unsupported";
+export type SupportLevel =
+  | "supported-local"
+  | "emulated"
+  | "partial"
+  | "validation-only"
+  | "unsupported"
+  | "requires-consent";
+export type RuntimeDisposition = "execute" | "emulate" | "inspect-only" | "reject" | "consent";
 export type IssueSeverity = "info" | "warning" | "error";
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "skipped";
 
@@ -78,6 +85,7 @@ export interface PipelineStep {
   with?: Record<string, string>;
   continueOnError?: boolean;
   support: SupportLevel;
+  featureRefs?: FeatureRef[];
   unsupportedFeatures?: FeatureSupport[];
 }
 
@@ -99,6 +107,7 @@ export interface PipelineJob {
   when?: string;
   environment?: string;
   support: SupportLevel;
+  featureRefs?: FeatureRef[];
   unsupportedFeatures?: FeatureSupport[];
 }
 
@@ -125,10 +134,32 @@ export interface ValidationIssue {
 }
 
 export interface FeatureSupport {
+  featureId: string;
   feature: string;
+  provider: ProviderID | "common";
+  category: string;
   path?: string;
+  origin?: SourceOrigin;
   support: SupportLevel;
+  runtimeDisposition: RuntimeDisposition;
   message: string;
+  localBehavior: string;
+  hostedDifferences: string;
+  securityImplications: string;
+  fallback: string;
+  documentation: string;
+}
+
+export interface SourceOrigin {
+  file: string;
+  line?: number;
+  column?: number;
+}
+
+export interface FeatureRef {
+  id: string;
+  path?: string;
+  origin?: SourceOrigin;
 }
 
 export interface ValidationReport {
@@ -147,6 +178,7 @@ export interface WorkflowDetails extends WorkflowSummary {
     edges: GraphEdge[];
   };
   validation: ValidationReport;
+  featureRefs?: FeatureRef[];
   unsupportedFeatures?: FeatureSupport[];
   executionPlan?: {
     jobs: Array<{
@@ -257,8 +289,10 @@ export interface RunPreparation {
 }
 
 export interface ProviderCapability {
+  featureId: string;
   name: string;
   support: SupportLevel;
+  runtimeDisposition: RuntimeDisposition;
 }
 
 export interface ProviderInfo {

@@ -1,4 +1,4 @@
-.PHONY: install desktop engine test package dmg linux windows clean
+.PHONY: install desktop engine test support-doc-check package dmg linux windows clean
 
 install:
 	npm install
@@ -12,8 +12,12 @@ engine:
 
 test:
 	cd engine && go test ./...
+	cd engine && go run ./cmd/supportdoc -check
 	npm --workspace packages/shared-types run build
 	npm --workspace apps/desktop run typecheck
+
+support-doc-check:
+	cd engine && go run ./cmd/supportdoc -check
 
 package:
 	node scripts/make-desktop.mjs

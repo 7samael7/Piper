@@ -93,6 +93,8 @@ type providerInfo struct {
 }
 
 type capability struct {
-	Name    string             `json:"name"`
-	Support model.SupportLevel `json:"support"`
+	FeatureID          string                   `json:"featureId"`
+	Name               string                   `json:"name"`
+	Support            model.SupportLevel       `json:"support"`
+	RuntimeDisposition model.RuntimeDisposition `json:"runtimeDisposition"`
 }

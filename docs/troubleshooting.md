@@ -16,6 +16,10 @@ Check `service_log` events, image health checks, required environment variables,
 
 Use the desktop consent prompt or call `run.prepare` with `allowThirdPartyCode=true`, then pass its token to `run.start`.
 
+## A support_error stops a run
+
+Open the feature in the Validation panel and follow its fallback. `unsupported` and unknown executable behavior is rejected deliberately; `validation-only` behavior is reported but never applied.
+
 ## PowerShell is missing
 
 Azure PowerShell handlers require `pwsh` in the selected job image.

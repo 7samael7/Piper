@@ -157,10 +157,12 @@ function ValidationDetails({ workflow }: { workflow: WorkflowDetails }) {
       </div>
       <div className="feature-list">
         {workflow.validation.features.map((feature) => (
-          <div className="feature-row" key={`${feature.feature}-${feature.path}`}>
+          <div className="feature-row" key={`${feature.featureId}-${feature.path}`}>
             <div>
-              <strong>{feature.feature}</strong>
-              <span>{feature.message}</span>
+              <strong title={feature.featureId}>{feature.feature}</strong>
+              <span>{feature.localBehavior}</span>
+              {feature.hostedDifferences ? <span>Hosted difference: {feature.hostedDifferences}</span> : null}
+              {feature.fallback ? <span>Fallback: {feature.fallback}</span> : null}
             </div>
             <SupportBadge support={feature.support} />
           </div>

@@ -3,160 +3,125 @@ package validation
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/7samael7/Piper/engine/internal/expression"
 	"github.com/7samael7/Piper/engine/internal/pipeline/graph"
 	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/support"
 )
 
 func Validate(_ context.Context, workflow *model.Workflow) model.ValidationReport {
+	registry, registryErr := support.Default()
 	report := model.ValidationReport{
-		Valid:    true,
-		Support:  model.SupportSupported,
-		Issues:   []model.ValidationIssue{},
-		Features: []model.FeatureSupport{},
+		Valid: true, Support: model.SupportSupportedLocal,
+		Issues: []model.ValidationIssue{}, Features: []model.FeatureSupport{},
 	}
-
-	addIssue := func(severity model.IssueSeverity, code, message, path string, support model.SupportLevel) {
+	addIssue := func(severity model.IssueSeverity, code, message, path string, level model.SupportLevel) {
 		report.Issues = append(report.Issues, model.ValidationIssue{
-			Severity: severity,
-			Code:     code,
-			Message:  message,
-			Path:     path,
-			Support:  support,
+			Severity: severity, Code: code, Message: message, Path: path, Support: level,
 		})
 		if severity == model.SeverityError {
 			report.Valid = false
 		}
-		report.Support = model.CombineSupport(report.Support, support)
+		report.Support = model.CombineSupport(report.Support, level)
 	}
-	addFeature := func(feature, path string, support model.SupportLevel, message string) {
-		report.Features = append(report.Features, model.FeatureSupport{
-			Feature: feature,
-			Path:    path,
-			Support: support,
-			Message: message,
-		})
-		report.Support = model.CombineSupport(report.Support, support)
+	if registryErr != nil {
+		addIssue(model.SeverityError, "support.registry", registryErr.Error(), "", model.SupportUnsupported)
+		return report
 	}
 
-	addFeature("workflow discovery", workflow.Path, model.SupportSupported, "Workflow was discovered from the local repository.")
-	addFeature("job dependency graph", "jobs", model.SupportSupported, "Job dependencies are visualized from the needs graph.")
-	addFeature("local runner parity", "", model.SupportPartial, "Local Docker execution does not perfectly match hosted CI runners.")
-	for _, unsupported := range workflow.Unsupported {
-		addFeature(unsupported.Feature, unsupported.Path, unsupported.Support, unsupported.Message)
+	seen := map[string]bool{}
+	resolveRefs := func(refs []model.FeatureRef) model.SupportLevel {
+		level := model.SupportSupportedLocal
+		for _, ref := range refs {
+			key := ref.ID + "\x00" + ref.Path
+			if seen[key] {
+				if entry, ok := registry.Get(ref.ID); ok {
+					level = model.CombineSupport(level, entry.Status)
+				}
+				continue
+			}
+			feature, err := registry.Resolve(ref)
+			if err != nil {
+				addIssue(model.SeverityError, "support.unknown_feature_id", err.Error(), ref.Path, model.SupportUnsupported)
+				continue
+			}
+			seen[key] = true
+			report.Features = append(report.Features, feature)
+			level = model.CombineSupport(level, feature.Support)
+			report.Support = model.CombineSupport(report.Support, feature.Support)
+		}
+		return level
 	}
+
+	base := []model.FeatureRef{
+		support.Ref("common.workflow.discovery", workflow.Path, nil),
+		support.Ref("common.graph", "jobs", nil),
+		support.Ref("common.local-runner", "", nil),
+	}
+	resolveRefs(base)
+	resolveRefs(workflow.Features)
 
 	if len(workflow.Jobs) == 0 {
 		addIssue(model.SeverityError, "workflow.no_jobs", "Workflow does not define any jobs.", "jobs", model.SupportUnsupported)
 	}
-
-	for _, trigger := range workflow.Triggers {
-		if workflow.Provider == model.ProviderGitHub && trigger.Name == "workflow_call" {
-			addFeature("workflow_call", "on.workflow_call", model.SupportUnsupported, "Reusable workflow calls are not executed locally in the MVP.")
-		}
-	}
-
 	if _, err := graph.TopologicalSort(workflow); err != nil {
 		addIssue(model.SeverityError, "workflow.graph", err.Error(), "jobs", model.SupportUnsupported)
 	}
 
-	for _, job := range workflow.Jobs {
+	for jobIndex := range workflow.Jobs {
+		job := &workflow.Jobs[jobIndex]
 		jobPath := fmt.Sprintf("jobs.%s", job.ID)
+		if len(job.Steps) == 0 && job.ReusableWorkflow == "" {
+			job.Features = appendFeatureRef(job.Features, support.Ref("common.empty-job", jobPath, job.Origin))
+			addIssue(model.SeverityWarning, "job.empty", "Job has no locally executable steps.", jobPath, model.SupportUnsupported)
+		}
+		job.Support = resolveRefs(job.Features)
 		if workflow.Provider == model.ProviderGitHub && job.Runner == "" && job.ReusableWorkflow == "" {
 			addIssue(model.SeverityWarning, "job.missing_runner", "Job does not declare runs-on.", jobPath+".runs-on", model.SupportPartial)
+			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
 		}
-		if job.Stage != "" {
-			addFeature("stage ordering", jobPath+".stage", model.SupportPartial, "Stage ordering is approximated locally through dependency edges.")
-		}
-		if job.Image != "" {
-			addFeature("job image", jobPath+".image", model.SupportPartial, "Job-specific Docker images are used locally when Docker can pull them.")
-		}
-		if job.ReusableWorkflow != "" {
-			addFeature("reusable workflow job", jobPath+".uses", model.SupportUnsupported, "jobs.<id>.uses is reported but not executed locally.")
-		}
-		if job.HasContainer {
-			addFeature("job container", jobPath+".container", model.SupportUnsupported, "Job container options are not emulated by the MVP executor.")
-		}
-		if job.HasServices {
-			addFeature("service containers", jobPath+".services", model.SupportSupported, "Service containers run on an isolated per-job Docker network.")
-		}
-		if job.HasStrategy {
-			if job.Matrix != nil {
-				addFeature("strategy matrix", jobPath+".strategy", model.SupportSupported, "The matrix is expanded into deterministic local job instances.")
-			} else {
-				addFeature("job strategy", jobPath+".strategy", model.SupportUnsupported, "This strategy form cannot be expanded locally.")
+		if job.Condition != nil {
+			if err := expression.Validate(*job.Condition); err != nil {
+				addIssue(model.SeverityError, err.Code, err.Message, jobPath+".if", model.SupportUnsupported)
+				job.Support = model.CombineSupport(job.Support, model.SupportUnsupported)
 			}
 		}
-		if job.If != "" {
-			addFeature("job condition", jobPath+".if", model.SupportSupported, "The condition is evaluated before the job is scheduled.")
-			if job.Condition != nil {
-				if err := expression.Validate(*job.Condition); err != nil {
-					addIssue(model.SeverityError, err.Code, err.Message, jobPath+".if", model.SupportUnsupported)
-				}
+		for stepIndex := range job.Steps {
+			step := &job.Steps[stepIndex]
+			stepPath := fmt.Sprintf("%s.steps[%d]", jobPath, stepIndex)
+			if step.Run == "" && step.Uses == "" {
+				step.Features = appendFeatureRef(step.Features, support.Ref("common.empty-step", stepPath, step.Origin))
 			}
-		}
-		for _, unsupported := range job.Unsupported {
-			addFeature(unsupported.Feature, unsupported.Path, unsupported.Support, unsupported.Message)
-		}
-
-		for index, step := range job.Steps {
-			stepPath := fmt.Sprintf("%s.steps[%d]", jobPath, index)
-			if step.Run != "" {
-				addFeature("shell run step", stepPath+".run", model.SupportSupported, "Shell run steps execute inside a Docker container.")
-				if containsExpression(step.Run) {
-					addFeature("expressions in run step", stepPath+".run", model.SupportPartial, "Provider expression syntax inside scripts is not fully evaluated before execution.")
-				}
+			if step.Run != "" && step.Uses != "" {
+				step.Features = appendFeatureRef(step.Features, support.Ref("common.ambiguous-step", stepPath, step.Origin))
+				addIssue(model.SeverityWarning, "step.ambiguous", "Step declares more than one executable form.", stepPath, model.SupportUnsupported)
 			}
+			step.Support = resolveRefs(step.Features)
 			if step.Condition != nil {
-				addFeature("step condition", stepPath+".if", model.SupportSupported, "The condition is evaluated immediately before the step.")
 				if err := expression.Validate(*step.Condition); err != nil {
 					addIssue(model.SeverityError, err.Code, err.Message, stepPath+".if", model.SupportUnsupported)
+					step.Support = model.CombineSupport(step.Support, model.SupportUnsupported)
 				}
-			}
-			if step.Uses != "" {
-				switch {
-				case workflow.Provider == model.ProviderGitHub && strings.HasPrefix(step.Uses, "actions/checkout@"):
-					addFeature("actions/checkout", stepPath+".uses", model.SupportPartial, "actions/checkout is treated as a local no-op because the repository is already mounted.")
-				case workflow.Provider == model.ProviderGitHub && strings.HasPrefix(step.Uses, "actions/setup-dotnet@"):
-					addFeature("actions/setup-dotnet", stepPath+".uses", model.SupportPartial, "actions/setup-dotnet is approximated with a matching .NET SDK Docker image; framework roll-forward may be used because hosted runner tool caches are not reproduced.")
-				case workflow.Provider == model.ProviderGitHub && strings.HasPrefix(step.Uses, "actions/setup-node@"):
-					addFeature("actions/setup-node", stepPath+".uses", model.SupportPartial, "actions/setup-node is approximated with a matching Node.js Docker image; caching and hosted-runner behavior are not emulated.")
-				case workflow.Provider == model.ProviderAzure && step.Uses == "checkout":
-					addFeature("Azure checkout", stepPath+".checkout", model.SupportPartial, "Azure checkout steps are treated as a local no-op because the repository is already mounted.")
-				case workflow.Provider == model.ProviderGitHub && strings.HasPrefix(step.Uses, "./"):
-					addFeature("local GitHub action", stepPath+".uses", model.SupportPartial, "Local JavaScript and composite actions execute when their declared runtime is available.")
-				case workflow.Provider == model.ProviderGitHub && strings.Contains(step.Uses, "@"):
-					addFeature("remote GitHub action", stepPath+".uses", model.SupportPartial, "Remote JavaScript and composite actions require explicit consent and are pinned to a resolved commit.")
-				case workflow.Provider == model.ProviderAzure && isAzureBuiltinTask(step.Uses):
-					addFeature("Azure task handler", stepPath+".task", model.SupportPartial, "This task uses a Piper local handler.")
-				default:
-					addFeature("external step", stepPath+".uses", model.SupportUnsupported, "No local handler is registered; execution fails visibly.")
-				}
-			}
-			for _, unsupported := range step.Unsupported {
-				addFeature(unsupported.Feature, unsupported.Path, unsupported.Support, unsupported.Message)
 			}
 			if step.Run == "" && step.Uses == "" {
-				addIssue(model.SeverityWarning, "step.empty", "Step has neither run nor uses.", stepPath, model.SupportUnsupported)
+				addIssue(model.SeverityWarning, "step.empty", "Step has neither a supported run command nor action/task.", stepPath, model.SupportUnsupported)
+				step.Support = model.CombineSupport(step.Support, model.SupportUnsupported)
 			}
+			job.Support = model.CombineSupport(job.Support, step.Support)
 		}
+		report.Support = model.CombineSupport(report.Support, job.Support)
 	}
 
+	workflow.Support = report.Support
 	return report
 }
 
-func isAzureBuiltinTask(value string) bool {
-	value = strings.ToLower(value)
-	for _, prefix := range []string{"publishbuildartifacts@", "downloadbuildartifacts@", "cache@"} {
-		if strings.HasPrefix(value, prefix) {
-			return true
+func appendFeatureRef(refs []model.FeatureRef, candidate model.FeatureRef) []model.FeatureRef {
+	for _, ref := range refs {
+		if ref.ID == candidate.ID && ref.Path == candidate.Path {
+			return refs
 		}
 	}
-	return false
-}
-
-func containsExpression(value string) bool {
-	return strings.Contains(value, "${{") && strings.Contains(value, "}}")
+	return append(refs, candidate)
 }

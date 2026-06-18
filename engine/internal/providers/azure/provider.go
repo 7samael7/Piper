@@ -14,6 +14,7 @@ import (
 	"github.com/7samael7/Piper/engine/internal/pipeline/plan"
 	"github.com/7samael7/Piper/engine/internal/pipeline/validation"
 	"github.com/7samael7/Piper/engine/internal/providers/yamlutil"
+	"github.com/7samael7/Piper/engine/internal/support"
 	"github.com/7samael7/Piper/engine/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -76,12 +77,15 @@ func (p *Provider) Load(ctx context.Context, repoPath, workflowPath string) (*mo
 	workflow.Validation = p.Validate(ctx, workflow)
 	workflow.Valid = workflow.Validation.Valid
 	workflow.Support = workflow.Validation.Support
+	workflow.Graph = graph.Build(workflow)
 	if workflow.Valid {
-		if executionPlan, compileErr := plan.Compile(workflow, plan.DefaultMaxExpandedJobs, plan.DefaultConcurrency); compileErr == nil {
-			workflow.ExecutionPlan = executionPlan
-			workflow.Graph = graph.BuildExecutionPlan(executionPlan)
-			workflow.JobCount = len(executionPlan.Jobs)
+		executionPlan, compileErr := plan.Compile(workflow, plan.DefaultMaxExpandedJobs, plan.DefaultConcurrency)
+		if compileErr != nil {
+			return nil, content, compileErr
 		}
+		workflow.ExecutionPlan = executionPlan
+		workflow.Graph = graph.BuildExecutionPlan(executionPlan)
+		workflow.JobCount = len(executionPlan.Jobs)
 	}
 	return workflow, content, nil
 }
@@ -166,10 +170,11 @@ func parseWorkflow(path string, content []byte) (*model.Workflow, error) {
 			Valid:    true,
 			Support:  model.SupportSupported,
 		},
-		RawYAML:     string(content),
-		Jobs:        jobs,
-		Unsupported: workflowUnsupported(root),
+		RawYAML:  string(content),
+		Jobs:     jobs,
+		Features: azureWorkflowFeatures(root),
 	}
+	model.ApplySourceFile(workflow, path)
 	return workflow, nil
 }
 
@@ -218,6 +223,10 @@ func parseWorkflowJobs(root *yaml.Node) []model.Job {
 			Env:     rootVariables,
 			Steps:   parseSteps(stepsNode, "jobs.pipeline"),
 			Support: model.SupportSupported,
+		}
+		if len(job.Steps) == 0 {
+			job.Features = append(job.Features, support.Ref("common.empty-job", "jobs.pipeline", azureOrigin(stepsNode)))
+			job.Support = model.SupportUnsupported
 		}
 		for _, step := range job.Steps {
 			job.Support = model.CombineSupport(job.Support, step.Support)
@@ -306,6 +315,16 @@ func parseJobsNode(node *yaml.Node, stageID string, stageIndex int, stageDepends
 			AllowFailure: yamlutil.ScalarBool(yamlutil.MappingValue(item, "continueOnError")),
 			Environment:  yamlutil.ScalarString(yamlutil.MappingValue(item, "environment")),
 			Origin:       &model.SourceOrigin{Line: item.Line, Column: item.Column},
+			Features:     []model.FeatureRef{support.Ref("azure.metadata", "jobs."+fullID, azureOrigin(item))},
+		}
+		if yamlutil.MappingValue(item, "variables") != nil || len(inheritedVariables) > 0 {
+			job.Features = append(job.Features, support.Ref("azure.variables", "jobs."+fullID+".variables", azureOrigin(yamlutil.MappingValue(item, "variables"))))
+		}
+		if yamlutil.MappingValue(item, "pool") != nil || inheritedPool != "" {
+			job.Features = append(job.Features, support.Ref("azure.pool", "jobs."+fullID+".pool", azureOrigin(yamlutil.MappingValue(item, "pool"))))
+		}
+		if job.If != "" {
+			job.Features = append(job.Features, support.Ref("azure.conditions", "jobs."+fullID+".condition", azureOrigin(yamlutil.MappingValue(item, "condition"))))
 		}
 		if job.If != "" {
 			job.Condition = &model.ConditionSpec{Provider: model.ProviderAzure, Original: job.If, Kind: "condition"}
@@ -317,18 +336,19 @@ func parseJobsNode(node *yaml.Node, stageID string, stageIndex int, stageDepends
 		if isDeployment {
 			job.HasStrategy = false
 		}
-		job.Unsupported = jobUnsupported(fullID, item, isDeployment)
+		job.Features = append(job.Features, azureJobFeatures(fullID, item, isDeployment)...)
 		if job.HasContainer || (job.HasStrategy && job.Matrix == nil) {
 			job.Support = model.SupportUnsupported
 		}
 		if isDeployment {
 			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
 		}
+		if len(job.Steps) == 0 {
+			job.Features = append(job.Features, support.Ref("common.empty-job", "jobs."+fullID, job.Origin))
+			job.Support = model.SupportUnsupported
+		}
 		if job.If != "" {
 			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
-		}
-		for _, feature := range job.Unsupported {
-			job.Support = model.CombineSupport(job.Support, feature.Support)
 		}
 		for _, step := range job.Steps {
 			job.Support = model.CombineSupport(job.Support, step.Support)
@@ -425,11 +445,17 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 	}
 	steps := make([]model.Step, 0, len(node.Content))
 	for index, item := range node.Content {
+		stepPath := fmt.Sprintf("%s.steps[%d]", path, index)
 		if item.Kind != yaml.MappingNode {
-			steps = append(steps, model.Step{Name: fmt.Sprintf("Step %d", index+1), Support: model.SupportUnsupported})
+			steps = append(steps, model.Step{
+				Name: fmt.Sprintf("Step %d", index+1), Support: model.SupportUnsupported,
+				Origin: azureOrigin(item),
+				Features: []model.FeatureRef{
+					support.Ref("common.empty-step", stepPath, azureOrigin(item)),
+				},
+			})
 			continue
 		}
-		stepPath := fmt.Sprintf("%s.steps[%d]", path, index)
 		step := model.Step{
 			Name:             firstNonEmpty(yamlutil.ScalarString(yamlutil.MappingValue(item, "displayName")), fmt.Sprintf("Step %d", index+1)),
 			Env:              yamlutil.StringMap(yamlutil.MappingValue(item, "env")),
@@ -439,8 +465,22 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 			Origin:           &model.SourceOrigin{Line: item.Line, Column: item.Column},
 			Support:          model.SupportSupported,
 		}
+		ambiguous := azureExecutableKeyCount(item) > 1
+		if ambiguous {
+			step.Features = append(step.Features, support.Ref("common.ambiguous-step", stepPath, azureOrigin(item)))
+		}
 		if step.If != "" {
 			step.Condition = &model.ConditionSpec{Provider: model.ProviderAzure, Original: step.If, Kind: "condition"}
+			step.Features = append(step.Features, support.Ref("azure.conditions", stepPath+".condition", azureOrigin(yamlutil.MappingValue(item, "condition"))))
+		}
+		if yamlutil.MappingValue(item, "env") != nil {
+			step.Features = append(step.Features, support.Ref("azure.variables", stepPath+".env", azureOrigin(yamlutil.MappingValue(item, "env"))))
+		}
+		if yamlutil.MappingValue(item, "workingDirectory") != nil {
+			step.Features = append(step.Features, support.Ref("azure.working-directory", stepPath+".workingDirectory", azureOrigin(yamlutil.MappingValue(item, "workingDirectory"))))
+		}
+		if step.ContinueOnError {
+			step.Features = append(step.Features, support.Ref("azure.continue-on-error", stepPath+".continueOnError", azureOrigin(yamlutil.MappingValue(item, "continueOnError"))))
 		}
 		switch {
 		case yamlutil.HasKey(item, "bash"):
@@ -449,32 +489,35 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 			if step.Name == fmt.Sprintf("Step %d", index+1) {
 				step.Name = yamlutil.FirstLine(step.Run)
 			}
+			step.Features = append(step.Features, support.Ref("azure.scripts", stepPath+".bash", azureOrigin(yamlutil.MappingValue(item, "bash"))), support.Ref("common.shell", stepPath+".bash", azureOrigin(yamlutil.MappingValue(item, "bash"))))
 		case yamlutil.HasKey(item, "script"):
 			step.Run = yamlutil.ScriptString(yamlutil.MappingValue(item, "script"))
 			step.Shell = "bash"
 			if step.Name == fmt.Sprintf("Step %d", index+1) {
 				step.Name = yamlutil.FirstLine(step.Run)
 			}
+			step.Features = append(step.Features, support.Ref("azure.scripts", stepPath+".script", azureOrigin(yamlutil.MappingValue(item, "script"))), support.Ref("common.shell", stepPath+".script", azureOrigin(yamlutil.MappingValue(item, "script"))))
 		case yamlutil.HasKey(item, "checkout"):
 			step.Uses = "checkout"
 			step.Support = model.SupportPartial
 			if step.Name == fmt.Sprintf("Step %d", index+1) {
 				step.Name = "checkout " + yamlutil.ScalarString(yamlutil.MappingValue(item, "checkout"))
 			}
+			step.Features = append(step.Features, support.Ref("azure.checkout", stepPath+".checkout", azureOrigin(yamlutil.MappingValue(item, "checkout"))))
 		case yamlutil.HasKey(item, "task"):
 			step.Uses = yamlutil.ScalarString(yamlutil.MappingValue(item, "task"))
+			taskName := step.Uses
 			step.With = yamlutil.StringMap(yamlutil.MappingValue(item, "inputs"))
+			taskFeature := azureTaskFeature(step.Uses)
+			step.Features = append(step.Features, support.Ref(taskFeature, stepPath+".task", azureOrigin(yamlutil.MappingValue(item, "task"))))
 			normalizeAzureTask(&step)
-			if step.Run == "" && step.Support == model.SupportUnsupported {
-				step.Unsupported = append(step.Unsupported, feature("Azure task", stepPath+".task", model.SupportUnsupported, "No local handler is registered for this Azure task and version."))
-			}
 			if step.Name == fmt.Sprintf("Step %d", index+1) {
-				step.Name = step.Uses
+				step.Name = taskName
 			}
 		case yamlutil.HasKey(item, "template"):
 			step.Uses = yamlutil.ScalarString(yamlutil.MappingValue(item, "template"))
 			step.Support = model.SupportUnsupported
-			step.Unsupported = append(step.Unsupported, feature("Azure step template", stepPath+".template", model.SupportUnsupported, "Azure step templates are reported but not expanded locally."))
+			step.Features = append(step.Features, support.Ref("azure.templates", stepPath+".template", azureOrigin(yamlutil.MappingValue(item, "template"))))
 			if step.Name == fmt.Sprintf("Step %d", index+1) {
 				step.Name = step.Uses
 			}
@@ -487,13 +530,40 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 				step.Shell = "powershell"
 			}
 			step.Support = model.SupportPartial
+			step.Features = append(step.Features, support.Ref("azure.scripts", stepPath, azureOrigin(item)), support.Ref("common.shell", stepPath, azureOrigin(item)))
 		default:
 			step.Support = model.SupportUnsupported
-			step.Unsupported = append(step.Unsupported, feature("Azure step", stepPath, model.SupportUnsupported, "This Azure step type is not implemented in the MVP."))
+			step.Features = append(step.Features, support.Ref("common.empty-step", stepPath, azureOrigin(item)))
 		}
+		if step.Run == "" && step.Uses == "" {
+			step.Features = appendUniqueAzureFeature(step.Features, support.Ref("common.empty-step", stepPath, azureOrigin(item)))
+		}
+		if ambiguous {
+			step.Support = model.SupportUnsupported
+		}
+		step.Features = append(step.Features, azureUnknownRefs(item, azureStepKeys, stepPath)...)
 		steps = append(steps, step)
 	}
 	return steps
+}
+
+func azureExecutableKeyCount(node *yaml.Node) int {
+	count := 0
+	for _, key := range []string{"bash", "script", "checkout", "task", "template", "pwsh", "powershell"} {
+		if yamlutil.HasKey(node, key) {
+			count++
+		}
+	}
+	return count
+}
+
+func appendUniqueAzureFeature(refs []model.FeatureRef, candidate model.FeatureRef) []model.FeatureRef {
+	for _, ref := range refs {
+		if ref.ID == candidate.ID && ref.Path == candidate.Path {
+			return refs
+		}
+	}
+	return append(refs, candidate)
 }
 
 func normalizeAzureTask(step *model.Step) {
@@ -617,61 +687,111 @@ func parseVariables(node *yaml.Node) map[string]string {
 	return values
 }
 
-func workflowUnsupported(root *yaml.Node) []model.FeatureSupport {
-	features := []model.FeatureSupport{}
+func azureWorkflowFeatures(root *yaml.Node) []model.FeatureRef {
+	features := []model.FeatureRef{support.Ref("azure.metadata", "workflow", azureOrigin(root))}
 	if yamlutil.HasKey(root, "extends") {
-		features = append(features, feature("Azure extends template", "extends", model.SupportUnsupported, "Azure extends templates are reported but not expanded locally."))
+		features = append(features, support.Ref("azure.templates", "extends", azureOrigin(yamlutil.MappingValue(root, "extends"))))
 	}
 	if yamlutil.HasKey(root, "resources") {
-		features = append(features, feature("Azure resources", "resources", model.SupportUnsupported, "Repository, pipeline, package, and container resources are not fetched by the MVP."))
+		features = append(features, support.Ref("azure.resources", "resources", azureOrigin(yamlutil.MappingValue(root, "resources"))))
 	}
 	if yamlutil.HasKey(root, "parameters") {
-		features = append(features, feature("Azure parameters", "parameters", model.SupportPartial, "Parameters are shown as YAML but are not evaluated with Azure template semantics."))
+		features = append(features, support.Ref("azure.parameters", "parameters", azureOrigin(yamlutil.MappingValue(root, "parameters"))))
 	}
-	if yamlutil.HasKey(root, "schedules") {
-		features = append(features, feature("Azure schedules", "schedules", model.SupportPartial, "Schedules are displayed but do not affect local runs."))
+	if yamlutil.HasKey(root, "schedules") || yamlutil.HasKey(root, "trigger") || yamlutil.HasKey(root, "pr") {
+		features = append(features, support.Ref("azure.triggers", "triggers", azureOrigin(root)))
 	}
-	if yamlutil.HasKey(root, "stages") {
-		features = append(features, feature("Azure stages", "stages", model.SupportPartial, "Stage ordering is approximated locally through dependency edges."))
+	if yamlutil.HasKey(root, "variables") {
+		features = append(features, support.Ref("azure.variables", "variables", azureOrigin(yamlutil.MappingValue(root, "variables"))))
 	}
-	return features
+	if yamlutil.HasKey(root, "pool") {
+		features = append(features, support.Ref("azure.pool", "pool", azureOrigin(yamlutil.MappingValue(root, "pool"))))
+	}
+	return append(features, azureUnknownRefs(root, azureWorkflowKeys, "")...)
 }
 
-func jobUnsupported(id string, item *yaml.Node, isDeployment bool) []model.FeatureSupport {
+func azureJobFeatures(id string, item *yaml.Node, isDeployment bool) []model.FeatureRef {
 	path := "jobs." + id
-	features := []model.FeatureSupport{}
+	features := []model.FeatureRef{}
 	if isDeployment {
-		features = append(features, feature("Azure deployment job", path, model.SupportPartial, "Deployment jobs use a local manual approval gate and internal-only network."))
+		features = append(features, support.Ref("azure.deployment", path, azureOrigin(item)))
 	}
 	if yamlutil.HasKey(item, "container") {
-		features = append(features, feature("Azure job container", path+".container", model.SupportUnsupported, "Azure job containers are not emulated by the MVP executor."))
+		features = append(features, support.Ref("azure.job-container", path+".container", azureOrigin(yamlutil.MappingValue(item, "container"))))
 	}
 	if yamlutil.HasKey(item, "services") {
-		features = append(features, feature("Azure services", path+".services", model.SupportSupported, "Services run on an isolated per-job Docker network."))
+		features = append(features, support.Ref("azure.services", path+".services", azureOrigin(yamlutil.MappingValue(item, "services"))))
 	}
 	if yamlutil.HasKey(item, "strategy") {
 		if matrix := yamlutil.MappingValue(yamlutil.MappingValue(item, "strategy"), "matrix"); matrix != nil {
-			features = append(features, feature("Azure matrix strategy", path+".strategy", model.SupportSupported, "Named matrix legs expand into local job instances."))
+			features = append(features, support.Ref("azure.matrix", path+".strategy", azureOrigin(yamlutil.MappingValue(item, "strategy"))))
 		} else {
-			features = append(features, feature("Azure strategy", path+".strategy", model.SupportUnsupported, "This Azure strategy form is not implemented locally."))
+			features = append(features, support.Ref("azure.unknown", path+".strategy", azureOrigin(yamlutil.MappingValue(item, "strategy"))))
 		}
 	}
-	if yamlutil.HasKey(item, "timeoutInMinutes") {
-		features = append(features, feature("Azure timeout", path+".timeoutInMinutes", model.SupportPartial, "Azure job timeouts are displayed but not enforced locally."))
+	if yamlutil.HasKey(item, "timeoutInMinutes") || yamlutil.HasKey(item, "cancelTimeoutInMinutes") {
+		features = append(features, support.Ref("azure.timeout", path+".timeoutInMinutes", azureOrigin(item)))
 	}
 	if yamlutil.HasKey(item, "continueOnError") {
-		features = append(features, feature("Azure continueOnError", path+".continueOnError", model.SupportPartial, "continueOnError is displayed but does not change local run conclusions."))
+		features = append(features, support.Ref("azure.continue-on-error", path+".continueOnError", azureOrigin(yamlutil.MappingValue(item, "continueOnError"))))
 	}
-	return features
+	return append(features, azureUnknownRefs(item, azureJobKeys, path)...)
 }
 
-func feature(name, path string, support model.SupportLevel, message string) model.FeatureSupport {
-	return model.FeatureSupport{
-		Feature: name,
-		Path:    path,
-		Support: support,
-		Message: message,
+func azureTaskFeature(task string) string {
+	lower := strings.ToLower(task)
+	switch {
+	case strings.HasPrefix(lower, "publishbuildartifacts@"), strings.HasPrefix(lower, "downloadbuildartifacts@"), strings.HasPrefix(lower, "cache@"):
+		return "azure.task-storage"
+	case strings.HasPrefix(lower, "bash@"), strings.HasPrefix(lower, "powershell@"), strings.HasPrefix(lower, "cmdline@"),
+		strings.HasPrefix(lower, "nodetool@"), strings.HasPrefix(lower, "usenode@"):
+		return "azure.task-runtime"
+	default:
+		return "azure.unknown-task"
 	}
+}
+
+var azureWorkflowKeys = map[string]bool{
+	"name": true, "trigger": true, "pr": true, "schedules": true, "variables": true,
+	"pool": true, "stages": true, "jobs": true, "steps": true, "parameters": true,
+	"extends": true, "resources": true,
+}
+
+var azureJobKeys = map[string]bool{
+	"job": true, "deployment": true, "displayName": true, "pool": true, "dependsOn": true,
+	"condition": true, "variables": true, "steps": true, "continueOnError": true,
+	"environment": true, "container": true, "services": true, "strategy": true,
+	"timeoutInMinutes": true, "cancelTimeoutInMinutes": true,
+}
+
+var azureStepKeys = map[string]bool{
+	"displayName": true, "env": true, "workingDirectory": true, "condition": true,
+	"continueOnError": true, "bash": true, "script": true, "checkout": true,
+	"task": true, "inputs": true, "template": true, "parameters": true,
+	"pwsh": true, "powershell": true,
+}
+
+func azureUnknownRefs(node *yaml.Node, known map[string]bool, prefix string) []model.FeatureRef {
+	result := []model.FeatureRef{}
+	for index := 0; node != nil && index+1 < len(node.Content); index += 2 {
+		key := node.Content[index]
+		if known[key.Value] {
+			continue
+		}
+		path := key.Value
+		if prefix != "" {
+			path = prefix + "." + key.Value
+		}
+		result = append(result, support.Ref("azure.unknown", path, azureOrigin(key)))
+	}
+	return result
+}
+
+func azureOrigin(node *yaml.Node) *model.SourceOrigin {
+	if node == nil {
+		return nil
+	}
+	return &model.SourceOrigin{Line: node.Line, Column: node.Column}
 }
 
 func firstNonEmpty(values ...string) string {

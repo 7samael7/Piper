@@ -77,6 +77,7 @@ Core packages:
 - `internal/expression`: provider-aware condition parsing, evaluation, and interpolation.
 - `internal/pipeline/graph`: logical and expanded graph construction.
 - `internal/pipeline/validation`: blocking validation and feature support classification.
+- `internal/support`: embedded feature registry, six-state aggregation, runtime dispositions, generated documentation, and contract tests.
 - `internal/providers/github`: GitHub Actions discovery and parsing.
 - `internal/providers/gitlab`: GitLab CI/CD discovery and parsing.
 - `internal/providers/azure`: Azure Pipelines discovery and parsing.
@@ -130,13 +131,15 @@ sequenceDiagram
 
 `run.start` is asynchronous. The request returns a run ID after validation and persistence; execution continues in a goroutine. A cancellation request invokes the run's `context.CancelFunc`, and the Docker executor kills the active job container if a step is running.
 
+Provider adapters emit stable feature references with paths and source locations. Validation resolves them through the support registry. The same resolved records drive badges, API capabilities, compatibility events, generated documentation, consent requirements, emulation notices, and runtime rejection.
+
 ## Execution model
 
 The local executor deliberately favors understandable behavior over broad emulation:
 
 1. Load and validate the selected workflow.
 2. Persist a queued run.
-3. Emit compatibility notices for partial and unsupported features.
+3. Emit compatibility notices for every feature not classified `supported-local`.
 4. Connect to Docker using `DOCKER_HOST`, the active Docker context, the default endpoint, or known local socket paths.
 5. Compile logical jobs into matrix-expanded execution instances.
 6. Schedule dependency-ready jobs within the configured concurrency limit.

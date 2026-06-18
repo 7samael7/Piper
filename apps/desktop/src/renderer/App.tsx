@@ -434,7 +434,8 @@ function formatBytes(value: number) {
 
 function isBuiltinActionReference(reference: string) {
   return reference.startsWith("actions/checkout@") ||
-    reference.startsWith("actions/setup-") ||
+    reference.startsWith("actions/setup-node@") ||
+    reference.startsWith("actions/setup-dotnet@") ||
     reference.startsWith("actions/upload-artifact@") ||
     reference.startsWith("actions/download-artifact@") ||
     reference.startsWith("actions/cache@");

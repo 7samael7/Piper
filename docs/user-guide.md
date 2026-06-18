@@ -145,9 +145,12 @@ Support labels describe local behavior:
 
 | Label | Meaning |
 | --- | --- |
-| `supported` | Piper implements the feature for its local execution model. |
-| `partial` | Piper displays or approximates the feature, but behavior differs from hosted CI. |
-| `unsupported` | Piper does not emulate the feature. |
+| `supported-local` | Implemented for Piper's local execution model. |
+| `emulated` | Deterministic local substitute with documented hosted differences. |
+| `partial` | Implemented with missing or approximate semantics. |
+| `validation-only` | Inspected and reported but never applied to execution. |
+| `requires-consent` | Remote code requires explicit approval before execution. |
+| `unsupported` | Rejected rather than silently skipped. |
 
 Workflow support is cumulative. One unsupported feature can make the workflow badge `unsupported`, even when other jobs or steps remain locally runnable.
 
@@ -171,7 +174,7 @@ Piper defaults to:
 | GitLab | `web` | `CI_PIPELINE_SOURCE` |
 | Azure | `manual` | `BUILD_REASON` |
 
-You can enter any value. It is passed to scripts but does not cause Piper to evaluate triggers, `if`, `rules`, `only`, `except`, or Azure conditions.
+You can enter any value. It is passed to scripts and supported job/step conditions; it does not prove that the hosted provider would trigger the pipeline.
 
 ### Inputs
 
@@ -398,7 +401,7 @@ Unsupported GitHub actions and Azure tasks fail visibly. Local and consented rem
 
 ### A job fails before its first step
 
-Check whether it declares a reusable workflow, container, services, matrix/parallel strategy, child pipeline, or deployment strategy. These job execution models are not locally supported.
+Check the structured `support_error` and feature fallback. Reusable workflows, unsupported job containers, GitLab parallel/child pipelines, unresolved remote includes, and Azure templates/resources are rejected. Services, static GitHub/Azure matrices, and locally approved deployment jobs use documented local behavior.
 
 ### Files changed after a run
 

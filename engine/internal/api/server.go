@@ -21,6 +21,7 @@ import (
 	"github.com/7samael7/Piper/engine/internal/providers/github"
 	"github.com/7samael7/Piper/engine/internal/providers/gitlab"
 	"github.com/7samael7/Piper/engine/internal/secrets"
+	"github.com/7samael7/Piper/engine/internal/support"
 	"github.com/google/uuid"
 )
 
@@ -263,19 +264,19 @@ func (s *Server) providerList() []providerInfo {
 			ID:           model.ProviderGitHub,
 			Name:         "GitHub Actions",
 			Description:  "Discover, validate, visualize, and locally execute GitHub Actions workflows.",
-			Capabilities: commonCapabilities(),
+			Capabilities: capabilitiesFor(model.ProviderGitHub),
 		},
 		{
 			ID:           model.ProviderGitLab,
 			Name:         "GitLab CI/CD",
 			Description:  "Discover, validate, visualize, and locally execute GitLab CI/CD pipelines.",
-			Capabilities: commonCapabilities(),
+			Capabilities: capabilitiesFor(model.ProviderGitLab),
 		},
 		{
 			ID:           model.ProviderAzure,
 			Name:         "Azure Pipelines",
 			Description:  "Discover, validate, visualize, and locally execute Azure Pipelines YAML.",
-			Capabilities: commonCapabilities(),
+			Capabilities: capabilitiesFor(model.ProviderAzure),
 		},
 	}
 }
@@ -459,7 +460,8 @@ func allRemoteActionsTrusted(workflow *model.Workflow, trusted []map[string]stri
 
 func isBuiltinActionReference(reference string) bool {
 	return strings.HasPrefix(reference, "actions/checkout@") ||
-		strings.HasPrefix(reference, "actions/setup-") ||
+		strings.HasPrefix(reference, "actions/setup-node@") ||
+		strings.HasPrefix(reference, "actions/setup-dotnet@") ||
 		strings.HasPrefix(reference, "actions/upload-artifact@") ||
 		strings.HasPrefix(reference, "actions/download-artifact@") ||
 		strings.HasPrefix(reference, "actions/cache@")
@@ -491,13 +493,20 @@ func validateSettings(settings model.Settings) error {
 	return nil
 }
 
-func commonCapabilities() []capability {
-	return []capability{
-		{Name: "discover", Support: model.SupportSupported},
-		{Name: "validate", Support: model.SupportSupported},
-		{Name: "graph", Support: model.SupportSupported},
-		{Name: "run shell steps", Support: model.SupportPartial},
+func capabilitiesFor(provider model.ProviderID) []capability {
+	registry, err := support.Default()
+	if err != nil {
+		return nil
 	}
+	entries := registry.EntriesFor(provider)
+	result := make([]capability, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, capability{
+			FeatureID: entry.ID, Name: entry.Title, Support: entry.Status,
+			RuntimeDisposition: entry.RuntimeDisposition,
+		})
+	}
+	return result
 }
 
 func defaultEventName(provider model.ProviderID) string {
@@ -542,18 +551,8 @@ func (s *Server) executeRun(ctx context.Context, record model.RunRecord, request
 	}
 
 	for _, feature := range workflow.Validation.Features {
-		if feature.Support != model.SupportSupported {
-			emit(logs.Event{
-				Time:    time.Now().UTC(),
-				Type:    "support_feature",
-				Stream:  "system",
-				Message: feature.Message,
-				Data: map[string]interface{}{
-					"feature": feature.Feature,
-					"path":    feature.Path,
-					"support": feature.Support,
-				},
-			})
+		if feature.Support != model.SupportSupportedLocal {
+			emit(compatibilityEvent(feature))
 		}
 	}
 
@@ -594,6 +593,21 @@ func (s *Server) executeRun(ctx context.Context, record model.RunRecord, request
 			Message: err.Error(),
 		})
 		_ = s.store.UpdateRunStatus(context.Background(), record.ID, model.RunFailed, "failed", true)
+	}
+}
+
+func compatibilityEvent(feature model.FeatureSupport) logs.Event {
+	return logs.Event{
+		Time: time.Now().UTC(), Type: "support_feature", Stream: "system", Message: feature.Message,
+		Data: map[string]interface{}{
+			"featureId": feature.FeatureID, "feature": feature.Feature,
+			"provider": feature.Provider, "category": feature.Category,
+			"path": feature.Path, "origin": feature.Origin, "support": feature.Support,
+			"runtimeDisposition": feature.RuntimeDisposition,
+			"localBehavior":      feature.LocalBehavior, "hostedDifferences": feature.HostedDifferences,
+			"securityImplications": feature.SecurityImplications, "fallback": feature.Fallback,
+			"documentation": feature.Documentation,
+		},
 	}
 }
 

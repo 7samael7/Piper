@@ -43,4 +43,4 @@ deploy:
     paths:
       - dist
   script:
-    - echo "Deploy is visible but artifacts are unsupported locally"
+    - echo "Artifacts use Piper-managed local emulation"
