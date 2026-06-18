@@ -1,6 +1,10 @@
 name: Release
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
   push:
     tags:
       - "v*.*.*"
@@ -15,27 +19,37 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+  group: release-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   prepare:
     name: Prepare release
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      target_sha: ${{ steps.release.outputs.target_sha }}
+      should_release: ${{ steps.release.outputs.should_release }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
       - name: Resolve version
         id: release
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ inputs.version }}
           REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="${INPUT_VERSION#v}"
+          elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            VERSION="$(node -p "require('./package.json').version")"
           else
             VERSION="${REF_NAME#v}"
           fi
@@ -45,17 +59,32 @@ jobs:
             exit 1
           fi
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          TAG="v$VERSION"
+          TARGET_SHA="$(git rev-parse HEAD)"
           if [[ "$VERSION" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            PRERELEASE=true
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            PRERELEASE=false
           fi
+
+          SHOULD_RELEASE=true
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Piper $TAG is already published; skipping this release."
+            SHOULD_RELEASE=false
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "target_sha=$TARGET_SHA"
+            echo "prerelease=$PRERELEASE"
+            echo "should_release=$SHOULD_RELEASE"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: Build DMG (${{ matrix.arch }})
     needs: prepare
+    if: ${{ needs.prepare.outputs.should_release == 'true' }}
     runs-on: macos-14
     strategy:
       fail-fast: false
@@ -70,6 +99,8 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
       - uses: actions/setup-go@v5
         with:
@@ -174,6 +205,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: [prepare, build]
+    if: ${{ needs.prepare.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -182,17 +214,19 @@ jobs:
           path: release
           merge-multiple: true
 
-      - name: Create or update release
+      - name: Create tag and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          VERSION: ${{ needs.prepare.outputs.version }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
-          EVENT_NAME: ${{ github.event_name }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
         run: |
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"
-            exit 0
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            gh api \
+              --method POST \
+              "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$TARGET_SHA"
           fi
 
           ARGS=(
@@ -201,12 +235,8 @@ jobs:
             --repo "$GITHUB_REPOSITORY"
             --title "Piper $TAG"
             --generate-notes
+            --verify-tag
           )
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            ARGS+=(--target "$GITHUB_SHA")
-          else
-            ARGS+=(--verify-tag)
-          fi
           if [[ "$PRERELEASE" == "true" ]]; then
             ARGS+=(--prerelease)
           fi

@@ -36,16 +36,19 @@ Docker Desktop, OrbStack, Colima, or another Docker-compatible daemon must be ru
 
 ## GitHub releases
 
-The root GitHub Actions workflows run Go and desktop checks on branches and pull requests. The `Release` workflow builds Intel and Apple Silicon DMGs, generates SHA-256 checksum files, and publishes them to a GitHub Release.
+The root GitHub Actions workflows run Go and desktop checks on branches and pull requests. After CI succeeds on `master`, the `Release` workflow reads the version from the root `package.json`, creates the matching Git tag, builds Intel and Apple Silicon DMGs, generates SHA-256 checksum files, and publishes them to a GitHub Release.
 
-Create a release by pushing a semantic-version tag:
+To create a release, update the project version before merging or pushing to `master`:
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+node scripts/set-version.mjs 0.2.0
+npm install --package-lock-only --ignore-scripts
+git add package.json package-lock.json apps/desktop/package.json packages/shared-types/package.json
+git commit -m "Prepare v0.2.0"
+git push origin master
 ```
 
-Alternatively, open **Actions → Release → Run workflow** and enter a version such as `0.2.0`. The workflow sets the packaged application version automatically; the version does not need to be edited in the repository first.
+Once CI passes, GitHub automatically creates `v0.2.0` and its release. If that release already exists, the release workflow safely skips it. You can still open **Actions → Release → Run workflow** and enter a version for a manual release.
 
 Packaged builds check the repository's latest GitHub Release and offer the architecture-matching DMG. Public repositories work without credentials. Private repositories can provide a fine-grained token with Contents read access through `PIPER_UPDATE_TOKEN` when launching the app.
 
