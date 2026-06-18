@@ -298,7 +298,7 @@ Every `run`, GitLab script block, Azure `bash`, or Azure `script` step runs as:
 
 The configured image must include `/bin/bash`. If it does not, use a Bash-capable image for local execution.
 
-The repository is mounted at `/workspace`. Relative working directories are resolved below that path. GitHub `defaults.run.working-directory` and parsed step working directories are honored. Declared shell values do not change the Bash executor.
+The repository is mounted at `/workspace`. Relative working directories are resolved below that path. GitHub `defaults.run.working-directory` and parsed step working directories are honored. Steps that declare `pwsh` or `powershell` run through `pwsh -NoLogo -NoProfile -NonInteractive -Command` and require `pwsh` in the image; other declared shell values do not change the Bash executor.
 
 All steps in one job share a container, so files and installed packages survive between that job's steps. Each later job receives a fresh container but sees any changes written to the mounted repository.
 
@@ -374,9 +374,9 @@ The YAML may be malformed or use a root shape Piper cannot parse. Validate it wi
 Start Docker Desktop, OrbStack, Colima, or another compatible daemon. Piper checks:
 
 - `DOCKER_HOST`.
-- The active Docker CLI context.
+- The active Docker CLI context (`DOCKER_CONTEXT` or the current context in Docker config).
 - Docker's default endpoint.
-- Common Docker Desktop, OrbStack, Colima, Rancher Desktop, and Linux runtime sockets.
+- Common local daemon sockets: Docker Desktop, OrbStack, Colima, and Rancher Desktop on macOS; `XDG_RUNTIME_DIR`, Docker Desktop, and Colima on Linux.
 
 If a nonstandard daemon is in use, set `DOCKER_HOST` before starting Piper.
 

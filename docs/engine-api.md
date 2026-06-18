@@ -48,7 +48,7 @@ Request:
 {"jsonrpc":"2.0","id":1,"method":"provider.list","params":{}}
 ```
 
-Result shape:
+The result contains every registered provider (`github`, `gitlab`, and `azure`). All three currently expose the same capability set; only the GitHub entry is shown in full below.
 
 ```json
 [
@@ -62,7 +62,9 @@ Result shape:
       {"name": "graph", "support": "supported"},
       {"name": "run shell steps", "support": "partial"}
     ]
-  }
+  },
+  {"id": "gitlab", "name": "GitLab CI/CD", "description": "Discover, validate, visualize, and locally execute GitLab CI/CD pipelines.", "capabilities": []},
+  {"id": "azure", "name": "Azure Pipelines", "description": "Discover, validate, visualize, and locally execute Azure Pipelines YAML.", "capabilities": []}
 ]
 ```
 
@@ -207,13 +209,13 @@ Persisted historical events can be retrieved with `run.get`.
 
 - `run.prepare` reports consent requirements and returns a short-lived token after third-party-code consent.
 - `run.get` returns a run record and its persisted structured events.
-- `run.approve` / `run.reject` release a deployment-environment approval gate.
+- `run.approve` / `run.reject` release a deployment-environment approval gate and return `{"accepted": boolean}`. `accepted=false` means no run was waiting for that decision in the current engine process.
 - `artifact.list` lists Piper-managed local artifacts.
 - `cache.list` / `cache.clear` inspect or clear local caches.
-- `settings.get` / `settings.update` manage concurrency, matrix, workspace, network, and mock-OIDC defaults.
+- `settings.get` / `settings.update` manage the defaults applied when a `run.start` field is left unset: concurrency, max expanded jobs, workspace mode, network access, mock OIDC, job/step timeouts, and memory/CPU/PID limits.
 - `trust.list` / `trust.update` manage repository action trust records.
 
-`run.start` additionally accepts `concurrency`, `maxExpandedJobs`, `workspaceMode`, `networkAccess`, `baseRef`, `preparedToken`, `mockOidc`, and `mockOidcClaims`.
+`run.start` additionally accepts `concurrency`, `maxExpandedJobs`, `workspaceMode` (`writable`, `read-only`, or `isolated`), `networkAccess` (`enabled`, `disabled`, or `internal`), `baseRef`, `preparedToken`, `mockOidc`, `mockOidcClaims`, `jobTimeoutSeconds`, `stepTimeoutSeconds`, `memoryMb`, `cpus`, and `pidsLimit`. Any of these left unset fall back to the stored settings.
 
 ## Notifications
 
@@ -251,23 +253,17 @@ Event fields:
 | `message` | string | Human-readable masked message. |
 | `data` | object | Optional structured metadata. |
 
-Common event types include:
+Event types, grouped by category:
 
-- `run_started`
-- `support_notice`
-- `support_feature`
-- `image_pull`
-- `job_started`
-- `step_started`
-- `step_log`
-- `step_skipped`
-- `step_unsupported`
-- `step_finished`
-- `step_failed`
-- `job_finished`
-- `run_finished`
-- `run_failed`
-- `run_cancelled`
+- Run lifecycle: `run_started`, `run_finished`, `run_failed`, `run_cancelled`.
+- Job lifecycle: `job_started`, `job_status`, `job_finished`, `job_skipped`, `job_failure_allowed`.
+- Step lifecycle: `step_started`, `step_log`, `step_finished`, `step_failed`, `step_skipped`, `step_unsupported`, `step_continued`.
+- Conditions: `condition_evaluated`, `condition_evaluation_error`.
+- Support and compatibility: `support_notice`, `support_feature`, `security_warning`.
+- Actions and images: `action_resolved`, `image_pull`.
+- Deployment approvals: `approval_required`, `approval_granted`.
+- Artifacts and caches: `artifact_published`, `artifact_downloaded`, `cache_hit`, `cache_miss`, `cache_saved`.
+- Services: `service_started`, `service_log`.
 
 The Electron main process can also broadcast an internal `engine.exit` event to the renderer when the sidecar terminates. This is not a JSON-RPC notification produced by the Go server.
 

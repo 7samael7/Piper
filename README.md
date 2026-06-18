@@ -132,9 +132,9 @@ An `unsupported` workflow may still contain runnable shell steps. Unsupported ac
 - Piper pulls a Docker image and creates one container per job.
 - Every step in a job runs in the same container.
 - Jobs run through a dependency-aware scheduler with configurable concurrency.
-- Shell commands always run through `/bin/bash -lc`.
+- Shell commands run through `/bin/bash -lc` by default; steps that declare `pwsh` or `powershell` run through `pwsh` instead.
 - The repository is bind-mounted at `/workspace`.
-- A failed shell step stops the job and the entire run.
+- A failed shell step stops that job; unrelated jobs still run, and the run's final status is failed.
 - Common GitHub, GitLab, and Azure job/step conditions are evaluated and false conditions produce explicit skip reasons.
 - Static GitHub and Azure matrices expand into independently selectable graph nodes.
 - Service containers, local artifacts, and local caches are emulated with Piper-managed Docker networks and storage.

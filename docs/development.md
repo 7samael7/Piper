@@ -203,7 +203,7 @@ make engine
 npm --workspace apps/desktop run package
 ```
 
-Build the engine for the host and run the makers configured for that platform:
+Cross-compile the engine for the host and run the makers configured for that platform:
 
 ```sh
 make package

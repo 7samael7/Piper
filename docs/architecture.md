@@ -46,6 +46,7 @@ Context isolation is enabled and Node integration is disabled. The preload scrip
 - Generic engine requests.
 - Application version information.
 - Update checks and update download/open behavior.
+- Revealing a stored artifact in the operating-system file manager.
 - Subscription to engine events.
 
 ### Main process
@@ -59,6 +60,7 @@ The Electron main process:
 5. Routes engine diagnostics from stderr to the Electron console.
 6. Sets the desktop database path.
 7. Owns GitHub Release update checks.
+8. Broadcasts an `engine.exit` event to the renderer if the sidecar terminates.
 
 In a packaged application, the engine is loaded from Electron resources. In development, Piper first looks for `engine/bin/piper-engine` and otherwise falls back to `go run ./cmd/daemon`.
 
@@ -139,7 +141,7 @@ The local executor deliberately favors understandable behavior over broad emulat
 5. Compile logical jobs into matrix-expanded execution instances.
 6. Schedule dependency-ready jobs within the configured concurrency limit.
 7. Evaluate job conditions and create an isolated Docker network/workspace.
-8. Start and health-check service containers, then start the job container.
+8. Start service containers and wait until they report ready, honoring image health checks when defined, then start the job container.
 9. Evaluate and execute each step, capturing outputs and structured status events.
 10. Publish local artifacts/caches and clean up all containers and networks.
 11. Aggregate deterministic final status and persist the run.
@@ -177,7 +179,7 @@ The app does not silently replace itself. Private repositories can provide `PIPE
 - The renderer is isolated from Node.js.
 - Engine access is local stdio rather than a listening network service.
 - Workflow code is not sandboxed from the mounted repository.
-- Docker containers use Docker's ordinary network unless the local daemon is configured otherwise.
+- Each job runs on a dedicated Piper-managed Docker network. Deployment jobs and runs configured with `disabled` or `internal` network access use an internal-only network with no external egress, though co-located service containers stay reachable.
 - Supplied secrets are environment variables and exact-value log masking is best-effort.
 - The repository path and workflow YAML should be treated as trusted input before execution.
 
