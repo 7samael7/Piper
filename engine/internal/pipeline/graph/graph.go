@@ -26,6 +26,26 @@ func Build(workflow *model.Workflow) model.Graph {
 	return model.Graph{Nodes: nodes, Edges: edges}
 }
 
+func BuildExecutionPlan(plan *model.ExecutionPlan) model.Graph {
+	if plan == nil {
+		return model.Graph{}
+	}
+	nodes := make([]model.GraphNode, 0, len(plan.Jobs))
+	edges := []model.GraphEdge{}
+	for _, instance := range plan.Jobs {
+		nodes = append(nodes, model.GraphNode{
+			ID: instance.ID, Label: instance.Name, Support: instance.Job.Support,
+			LogicalJobID: instance.LogicalJobID, Matrix: instance.Matrix,
+		})
+		for _, need := range instance.Needs {
+			edges = append(edges, model.GraphEdge{
+				ID: need + "-" + instance.ID, Source: need, Target: instance.ID,
+			})
+		}
+	}
+	return model.Graph{Nodes: nodes, Edges: edges}
+}
+
 func TopologicalSort(workflow *model.Workflow) ([]model.Job, error) {
 	jobsByID := make(map[string]model.Job, len(workflow.Jobs))
 	inDegree := make(map[string]int, len(workflow.Jobs))

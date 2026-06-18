@@ -2,7 +2,44 @@ export type ProviderID = "github" | "gitlab" | "azure";
 
 export type SupportLevel = "supported" | "partial" | "unsupported";
 export type IssueSeverity = "info" | "warning" | "error";
-export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "skipped";
+
+export interface EvaluationError {
+  code: string;
+  message: string;
+  position?: number;
+}
+
+export interface ConditionSpec {
+  provider: ProviderID;
+  original: string;
+  kind?: string;
+}
+
+export interface ConditionResult {
+  expression: string;
+  evaluated: boolean;
+  value: boolean;
+  reason?: string;
+  error?: EvaluationError;
+}
+
+export interface MatrixSpec {
+  dimensions?: Record<string, unknown[]>;
+  include?: Record<string, unknown>[];
+  exclude?: Record<string, unknown>[];
+  azureLegs?: Record<string, Record<string, string>>;
+  failFast: boolean;
+  maxParallel?: number;
+}
+
+export interface ServiceSpec {
+  name: string;
+  image: string;
+  env?: Record<string, string>;
+  ports?: string[];
+  aliases?: string[];
+}
 
 export interface TriggerInput {
   name: string;
@@ -35,8 +72,11 @@ export interface PipelineStep {
   run?: string;
   shell?: string;
   workingDirectory?: string;
+  if?: string;
+  condition?: ConditionSpec;
   env?: Record<string, string>;
   with?: Record<string, string>;
+  continueOnError?: boolean;
   support: SupportLevel;
   unsupportedFeatures?: FeatureSupport[];
 }
@@ -49,8 +89,15 @@ export interface PipelineJob {
   image?: string;
   needs: string[];
   if?: string;
+  condition?: ConditionSpec;
   steps: PipelineStep[];
   env?: Record<string, string>;
+  outputs?: Record<string, string>;
+  matrix?: MatrixSpec;
+  services?: ServiceSpec[];
+  allowFailure?: boolean;
+  when?: string;
+  environment?: string;
   support: SupportLevel;
   unsupportedFeatures?: FeatureSupport[];
 }
@@ -59,6 +106,8 @@ export interface GraphNode {
   id: string;
   label: string;
   support: SupportLevel;
+  logicalJobId?: string;
+  matrix?: Record<string, unknown>;
 }
 
 export interface GraphEdge {
@@ -91,6 +140,7 @@ export interface ValidationReport {
 
 export interface WorkflowDetails extends WorkflowSummary {
   rawYaml: string;
+  resolvedYaml?: string;
   jobs: PipelineJob[];
   graph: {
     nodes: GraphNode[];
@@ -98,6 +148,17 @@ export interface WorkflowDetails extends WorkflowSummary {
   };
   validation: ValidationReport;
   unsupportedFeatures?: FeatureSupport[];
+  executionPlan?: {
+    jobs: Array<{
+      id: string;
+      logicalJobId: string;
+      name: string;
+      needs: string[];
+      matrix?: Record<string, unknown>;
+    }>;
+    maxConcurrency: number;
+    maxExpandedJobs: number;
+  };
 }
 
 export interface RunConfig {
@@ -109,6 +170,19 @@ export interface RunConfig {
   inputs: Record<string, string>;
   env: Record<string, string>;
   secrets: Record<string, string>;
+  baseRef?: string;
+  concurrency?: number;
+  maxExpandedJobs?: number;
+  workspaceMode?: "writable" | "read-only" | "isolated";
+  preparedToken?: string;
+  networkAccess?: "enabled" | "disabled" | "internal";
+  mockOidc?: boolean;
+  mockOidcClaims?: Record<string, string>;
+  jobTimeoutSeconds?: number;
+  stepTimeoutSeconds?: number;
+  memoryMb?: number;
+  cpus?: number;
+  pidsLimit?: number;
 }
 
 export interface RunStartResponse {
@@ -138,6 +212,48 @@ export interface RunRecord {
   conclusion?: string;
   startedAt: string;
   completedAt?: string;
+}
+
+export interface ArtifactRecord {
+  id: string;
+  runId: string;
+  jobId: string;
+  name: string;
+  path: string;
+  sourcePaths: string[];
+  createdAt: string;
+  size: number;
+}
+
+export interface CacheRecord {
+  id: string;
+  scope: string;
+  key: string;
+  path: string;
+  size: number;
+  createdAt: string;
+  lastUsedAt: string;
+}
+
+export interface PiperSettings {
+  concurrency: number;
+  maxExpandedJobs: number;
+  workspaceMode: "writable" | "read-only" | "isolated";
+  networkAccess: "enabled" | "disabled" | "internal";
+  mockOidc: boolean;
+  jobTimeoutSeconds: number;
+  stepTimeoutSeconds: number;
+  memoryMb: number;
+  cpus: number;
+  pidsLimit: number;
+}
+
+export interface RunPreparation {
+  requirements: string[];
+  requiresConsent: boolean;
+  requiresApproval: boolean;
+  preparedToken?: string;
+  expiresAt?: string;
 }
 
 export interface ProviderCapability {

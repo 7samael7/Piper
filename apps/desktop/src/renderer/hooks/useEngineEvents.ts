@@ -15,6 +15,12 @@ export function useEngineEvents() {
       }
       const runEvent = event.params as RunEvent;
       appendRunEvent(runEvent);
+      if (runEvent.type.startsWith("artifact_")) {
+        void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
+      }
+      if (runEvent.type.startsWith("cache_")) {
+        void queryClient.invalidateQueries({ queryKey: ["caches"] });
+      }
       if (runEvent.type === "run_finished" || runEvent.type === "run_failed" || runEvent.type === "run_cancelled") {
         setActiveRunId("");
         void queryClient.invalidateQueries({ queryKey: ["history"] });

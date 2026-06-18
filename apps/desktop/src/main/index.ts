@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -163,6 +163,14 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("engine.request", async (_event, method: string, params?: unknown) => {
     return engine.request(method, params);
+  });
+  ipcMain.handle("artifact.reveal", async (_event, artifactId: string) => {
+    const artifacts = await engine.request<Array<{ id: string; path: string }>>("artifact.list", {});
+    const artifact = artifacts.find((item) => item.id === artifactId);
+    if (!artifact) {
+      throw new Error("Artifact was not found.");
+    }
+    shell.showItemInFolder(artifact.path);
   });
   ipcMain.handle("app.info", () => ({
     version: app.getVersion(),

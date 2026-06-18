@@ -201,7 +201,19 @@ Parameters:
 
 The desktop app requests a limit of 25 for the current repository.
 
-There is currently no public RPC method for retrieving persisted historical events.
+Persisted historical events can be retrieved with `run.get`.
+
+### Additional execution and storage methods
+
+- `run.prepare` reports consent requirements and returns a short-lived token after third-party-code consent.
+- `run.get` returns a run record and its persisted structured events.
+- `run.approve` / `run.reject` release a deployment-environment approval gate.
+- `artifact.list` lists Piper-managed local artifacts.
+- `cache.list` / `cache.clear` inspect or clear local caches.
+- `settings.get` / `settings.update` manage concurrency, matrix, workspace, network, and mock-OIDC defaults.
+- `trust.list` / `trust.update` manage repository action trust records.
+
+`run.start` additionally accepts `concurrency`, `maxExpandedJobs`, `workspaceMode`, `networkAccess`, `baseRef`, `preparedToken`, `mockOidc`, and `mockOidcClaims`.
 
 ## Notifications
 

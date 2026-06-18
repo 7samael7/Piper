@@ -125,18 +125,20 @@ Piper labels workflows, jobs, steps, and individual features:
 - `partial`: represented or approximated, but not fully equivalent to hosted CI.
 - `unsupported`: not emulated locally.
 
-An `unsupported` workflow may still contain runnable shell steps. Unsupported action/task steps are usually reported and skipped; unsupported job-level execution models such as service containers, matrices, reusable workflows, and job containers stop that job with an error.
+An `unsupported` workflow may still contain runnable shell steps. Unsupported actions and tasks fail visibly; unsupported job-level execution models such as reusable workflows and custom job containers stop that job with an error.
 
 ## How local execution works
 
 - Piper pulls a Docker image and creates one container per job.
 - Every step in a job runs in the same container.
-- Jobs run sequentially in dependency order; local parallel execution is not implemented.
+- Jobs run through a dependency-aware scheduler with configurable concurrency.
 - Shell commands always run through `/bin/bash -lc`.
 - The repository is bind-mounted at `/workspace`.
 - A failed shell step stops the job and the entire run.
-- Recognized conditions are reported but not evaluated, and step conditions are not enforced, so conditional jobs and steps may run locally.
-- Unsupported external actions and tasks are skipped with a log notice unless they require an unsupported job execution model.
+- Common GitHub, GitLab, and Azure job/step conditions are evaluated and false conditions produce explicit skip reasons.
+- Static GitHub and Azure matrices expand into independently selectable graph nodes.
+- Service containers, local artifacts, and local caches are emulated with Piper-managed Docker networks and storage.
+- Unsupported actions and tasks fail visibly. Remote GitHub actions require explicit consent before download or execution.
 
 > [!WARNING]
 > The bind mount is writable. Pipeline commands can modify or delete files in the opened repository. Review untrusted YAML before running it, and use a disposable worktree when appropriate.
@@ -164,6 +166,8 @@ Treat locally executed pipelines as trusted code. Containers can access the moun
 - [Development Guide](docs/development.md) — setup, commands, packaging, testing, and releases
 - [Architecture](docs/architecture.md) — desktop, engine, persistence, and execution design
 - [Engine API](docs/engine-api.md) — newline-delimited JSON-RPC protocol and methods
+- [Security](docs/security.md) — trust, workspaces, networking, secrets, and mock identity
+- [Troubleshooting](docs/troubleshooting.md) — Docker, actions, services, and local storage
 
 ## Common development commands
 
@@ -180,6 +184,6 @@ make clean         # Remove generated build output and dependencies
 
 ## Current boundaries
 
-Piper is an MVP focused on transparent local feedback. It does not currently provide hosted runner parity, parallel jobs, artifact or cache handling, service containers, deployment environments, OIDC, provider expression evaluation, or cloud API integration.
+Piper remains a local approximation. It supports common conditions, matrices, parallel jobs, service containers, local artifacts/caches, selected actions/tasks, deployment approval simulation, and clearly marked mock OIDC. Hosted tool caches, cloud artifact backends, real identity federation, reusable workflows, every marketplace action, and full template-language parity remain outside the local model.
 
 If local behavior and hosted CI disagree, hosted CI remains the source of truth.

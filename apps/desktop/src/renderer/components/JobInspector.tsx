@@ -3,16 +3,22 @@ import Editor from "@monaco-editor/react";
 import { AlertTriangle, CheckCircle2, FileCode2, ListChecks } from "lucide-react";
 import type { PipelineJob, WorkflowDetails } from "@piper/shared-types";
 import { SupportBadge } from "./SupportBadge";
+import type { ExecutionState } from "../store/piperStore";
 
 interface JobInspectorProps {
   workflow?: WorkflowDetails;
   selectedJobId: string;
+  jobStates: Record<string, ExecutionState>;
+  stepStates: Record<string, ExecutionState>;
 }
 
-export function JobInspector({ workflow, selectedJobId }: JobInspectorProps) {
-  const [tab, setTab] = useState<"job" | "yaml">("job");
+export function JobInspector({ workflow, selectedJobId, jobStates, stepStates }: JobInspectorProps) {
+  const [tab, setTab] = useState<"job" | "yaml" | "resolved">("job");
   const selectedJob = useMemo(
-    () => workflow?.jobs.find((job) => job.id === selectedJobId) ?? workflow?.jobs[0],
+    () => {
+      const logicalId = workflow?.executionPlan?.jobs.find((job) => job.id === selectedJobId)?.logicalJobId ?? selectedJobId;
+      return workflow?.jobs.find((job) => job.id === logicalId) ?? workflow?.jobs[0];
+    },
     [selectedJobId, workflow],
   );
 
@@ -31,12 +37,18 @@ export function JobInspector({ workflow, selectedJobId }: JobInspectorProps) {
           <FileCode2 size={16} />
           YAML
         </button>
+        {workflow.resolvedYaml ? (
+          <button className={tab === "resolved" ? "tab active" : "tab"} onClick={() => setTab("resolved")}>
+            <FileCode2 size={16} />
+            Resolved
+          </button>
+        ) : null}
       </div>
 
-      {tab === "yaml" ? (
+      {tab === "yaml" || tab === "resolved" ? (
         <div className="editor-shell">
           <Editor
-            value={workflow.rawYaml}
+            value={tab === "resolved" ? workflow.resolvedYaml : workflow.rawYaml}
             language="yaml"
             theme="vs-light"
             options={{
@@ -51,7 +63,9 @@ export function JobInspector({ workflow, selectedJobId }: JobInspectorProps) {
       ) : (
         <div className="inspector-scroll">
           <WorkflowSummary workflow={workflow} />
-          {selectedJob ? <JobDetails job={selectedJob} /> : <div className="empty-state">No job selected.</div>}
+          {selectedJob ? (
+            <JobDetails job={selectedJob} state={jobStates[selectedJobId || selectedJob.id]} stepStates={stepStates} stateJobId={selectedJobId || selectedJob.id} />
+          ) : <div className="empty-state">No job selected.</div>}
           <ValidationDetails workflow={workflow} />
         </div>
       )}
@@ -78,7 +92,7 @@ function WorkflowSummary({ workflow }: { workflow: WorkflowDetails }) {
   );
 }
 
-function JobDetails({ job }: { job: PipelineJob }) {
+function JobDetails({ job, state, stepStates, stateJobId }: { job: PipelineJob; state?: ExecutionState; stepStates: Record<string, ExecutionState>; stateJobId: string }) {
   return (
     <section className="inspector-section">
       <div className="section-title">
@@ -86,6 +100,8 @@ function JobDetails({ job }: { job: PipelineJob }) {
         <SupportBadge support={job.support} />
       </div>
       <div className="meta-grid">
+        <span>Status</span>
+        <strong>{state?.status ?? "not run"}</strong>
         <span>ID</span>
         <strong>{job.id}</strong>
         <span>Runs on</span>
@@ -96,13 +112,21 @@ function JobDetails({ job }: { job: PipelineJob }) {
         <strong>{job.image || "default local image"}</strong>
         <span>Needs</span>
         <strong>{job.needs.length ? job.needs.join(", ") : "none"}</strong>
+        {state?.condition ? (
+          <>
+            <span>Condition</span>
+            <strong title={state.condition.expression}>{state.condition.reason}</strong>
+          </>
+        ) : null}
       </div>
       <div className="step-list">
         {job.steps.map((step, index) => (
           <div className="step-row" key={`${step.id || step.name}-${index}`}>
             <div>
               <strong>{step.name}</strong>
-              <span>{step.run ? "run" : step.uses || "empty"}</span>
+              <span>
+                {stepStates[`${stateJobId}/${step.id || `step-${index + 1}`}`]?.status ?? (step.run ? "run" : step.uses || "empty")}
+              </span>
             </div>
             <SupportBadge support={step.support} />
           </div>

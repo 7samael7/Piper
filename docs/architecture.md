@@ -70,13 +70,17 @@ Core packages:
 
 - `internal/api`: request dispatch, asynchronous run management, cancellation, and notifications.
 - `internal/pipeline/model`: provider-neutral workflows, jobs, steps, graphs, validation, and run records.
-- `internal/pipeline/graph`: graph construction and topological ordering.
+- `internal/pipeline/plan`: matrix expansion and provider-neutral executable job instances.
+- `internal/scheduler`: dependency-aware bounded parallel scheduling.
+- `internal/expression`: provider-aware condition parsing, evaluation, and interpolation.
+- `internal/pipeline/graph`: logical and expanded graph construction.
 - `internal/pipeline/validation`: blocking validation and feature support classification.
 - `internal/providers/github`: GitHub Actions discovery and parsing.
 - `internal/providers/gitlab`: GitLab CI/CD discovery and parsing.
 - `internal/providers/azure`: Azure Pipelines discovery and parsing.
 - `internal/providers/yamlutil`: shared YAML node helpers.
 - `internal/executor/docker`: Docker connection, image selection, containers, shell execution, and event streaming.
+- `internal/actions`, `internal/artifacts`, `internal/caches`, and `internal/workspace`: local action resolution and managed execution data.
 - `internal/persistence`: SQLite run and event persistence.
 - `internal/logs`: structured run-event types.
 - `internal/secrets`: exact-value log masking.
@@ -132,15 +136,15 @@ The local executor deliberately favors understandable behavior over broad emulat
 2. Persist a queued run.
 3. Emit compatibility notices for partial and unsupported features.
 4. Connect to Docker using `DOCKER_HOST`, the active Docker context, the default endpoint, or known local socket paths.
-5. Resolve jobs in topological order, or select exactly one requested job.
-6. Resolve a job image and pull it.
-7. Create a container with the repository mounted at `/workspace`.
-8. Execute each shell step with `/bin/bash -lc` in that container.
-9. Stream masked stdout and stderr as structured events.
-10. Remove the container and continue to the next job.
-11. Persist the final run state.
+5. Compile logical jobs into matrix-expanded execution instances.
+6. Schedule dependency-ready jobs within the configured concurrency limit.
+7. Evaluate job conditions and create an isolated Docker network/workspace.
+8. Start and health-check service containers, then start the job container.
+9. Evaluate and execute each step, capturing outputs and structured status events.
+10. Publish local artifacts/caches and clean up all containers and networks.
+11. Aggregate deterministic final status and persist the run.
 
-There is no parallel scheduling. Recognized conditions are retained for support reporting but are not evaluated. One container is shared by all steps in a job, but jobs do not share a container.
+One container is shared by all steps in a job instance. Independent job instances may run concurrently and never share containers or service networks.
 
 ## Persistence
 

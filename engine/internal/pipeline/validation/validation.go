@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/7samael7/Piper/engine/internal/expression"
 	"github.com/7samael7/Piper/engine/internal/pipeline/graph"
 	"github.com/7samael7/Piper/engine/internal/pipeline/model"
 )
@@ -79,13 +80,22 @@ func Validate(_ context.Context, workflow *model.Workflow) model.ValidationRepor
 			addFeature("job container", jobPath+".container", model.SupportUnsupported, "Job container options are not emulated by the MVP executor.")
 		}
 		if job.HasServices {
-			addFeature("service containers", jobPath+".services", model.SupportUnsupported, "Service containers are not started by the MVP executor.")
+			addFeature("service containers", jobPath+".services", model.SupportSupported, "Service containers run on an isolated per-job Docker network.")
 		}
 		if job.HasStrategy {
-			addFeature("strategy matrix", jobPath+".strategy", model.SupportUnsupported, "Matrix expansion is not implemented in the MVP.")
+			if job.Matrix != nil {
+				addFeature("strategy matrix", jobPath+".strategy", model.SupportSupported, "The matrix is expanded into deterministic local job instances.")
+			} else {
+				addFeature("job strategy", jobPath+".strategy", model.SupportUnsupported, "This strategy form cannot be expanded locally.")
+			}
 		}
 		if job.If != "" {
-			addFeature("job condition", jobPath+".if", model.SupportPartial, "Provider-specific conditional expressions are shown but not fully evaluated locally.")
+			addFeature("job condition", jobPath+".if", model.SupportSupported, "The condition is evaluated before the job is scheduled.")
+			if job.Condition != nil {
+				if err := expression.Validate(*job.Condition); err != nil {
+					addIssue(model.SeverityError, err.Code, err.Message, jobPath+".if", model.SupportUnsupported)
+				}
+			}
 		}
 		for _, unsupported := range job.Unsupported {
 			addFeature(unsupported.Feature, unsupported.Path, unsupported.Support, unsupported.Message)
@@ -99,6 +109,12 @@ func Validate(_ context.Context, workflow *model.Workflow) model.ValidationRepor
 					addFeature("expressions in run step", stepPath+".run", model.SupportPartial, "Provider expression syntax inside scripts is not fully evaluated before execution.")
 				}
 			}
+			if step.Condition != nil {
+				addFeature("step condition", stepPath+".if", model.SupportSupported, "The condition is evaluated immediately before the step.")
+				if err := expression.Validate(*step.Condition); err != nil {
+					addIssue(model.SeverityError, err.Code, err.Message, stepPath+".if", model.SupportUnsupported)
+				}
+			}
 			if step.Uses != "" {
 				switch {
 				case workflow.Provider == model.ProviderGitHub && strings.HasPrefix(step.Uses, "actions/checkout@"):
@@ -109,8 +125,14 @@ func Validate(_ context.Context, workflow *model.Workflow) model.ValidationRepor
 					addFeature("actions/setup-node", stepPath+".uses", model.SupportPartial, "actions/setup-node is approximated with a matching Node.js Docker image; caching and hosted-runner behavior are not emulated.")
 				case workflow.Provider == model.ProviderAzure && step.Uses == "checkout":
 					addFeature("Azure checkout", stepPath+".checkout", model.SupportPartial, "Azure checkout steps are treated as a local no-op because the repository is already mounted.")
+				case workflow.Provider == model.ProviderGitHub && strings.HasPrefix(step.Uses, "./"):
+					addFeature("local GitHub action", stepPath+".uses", model.SupportPartial, "Local JavaScript and composite actions execute when their declared runtime is available.")
+				case workflow.Provider == model.ProviderGitHub && strings.Contains(step.Uses, "@"):
+					addFeature("remote GitHub action", stepPath+".uses", model.SupportPartial, "Remote JavaScript and composite actions require explicit consent and are pinned to a resolved commit.")
+				case workflow.Provider == model.ProviderAzure && isAzureBuiltinTask(step.Uses):
+					addFeature("Azure task handler", stepPath+".task", model.SupportPartial, "This task uses a Piper local handler.")
 				default:
-					addFeature("external step", stepPath+".uses", model.SupportUnsupported, "Only shell steps and provider checkout no-ops are supported in the MVP.")
+					addFeature("external step", stepPath+".uses", model.SupportUnsupported, "No local handler is registered; execution fails visibly.")
 				}
 			}
 			for _, unsupported := range step.Unsupported {
@@ -123,6 +145,16 @@ func Validate(_ context.Context, workflow *model.Workflow) model.ValidationRepor
 	}
 
 	return report
+}
+
+func isAzureBuiltinTask(value string) bool {
+	value = strings.ToLower(value)
+	for _, prefix := range []string{"publishbuildartifacts@", "downloadbuildartifacts@", "cache@"} {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsExpression(value string) bool {

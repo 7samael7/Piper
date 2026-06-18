@@ -11,19 +11,19 @@ Piper maps GitHub Actions, GitLab CI/CD, and Azure Pipelines YAML into a common 
 | YAML discovery and parsing | Supported | Reads recognized files from the selected repository. |
 | Job graph | Supported | Builds nodes and dependency edges and rejects missing dependencies or cycles. |
 | Shell steps | Supported | Runs with `/bin/bash -lc` in Docker. |
-| Whole-workflow execution | Supported | Runs jobs sequentially in topological order. |
+| Whole-workflow execution | Supported | Runs dependency-ready jobs concurrently within the configured limit. |
 | Single-job execution | Supported | Runs only the selected job, without dependencies. |
 | Repository checkout | Partial | Repository is bind-mounted at `/workspace`; provider checkout is not performed. |
 | Job and step environment | Partial | Parsed values become environment variables; expression expansion is not performed. |
-| Conditions and expressions | Partial | Recognized forms are reported or retained as metadata; they are not enforced. |
+| Conditions and expressions | Partial | Common provider expressions are evaluated with structured errors and skip reasons; full hosted expression parity is not claimed. |
 | Hosted runner parity | Partial | Local Linux images replace hosted runner environments. |
-| Parallel jobs | Unsupported | Jobs always run sequentially. |
-| Artifacts and caches | Unsupported | No upload, download, restore, or cross-job artifact handling. |
-| Service containers | Unsupported | No service containers are started. |
-| Matrix expansion | Unsupported | A matrix is not expanded into jobs. |
-| Deployment environments and OIDC | Unsupported | No provider cloud or identity integration. |
+| Parallel jobs | Supported | Dependency-ready jobs run concurrently within a configurable limit. |
+| Artifacts and caches | Partial | Piper-managed local emulation supports common provider declarations and actions. |
+| Service containers | Supported | Services run on isolated per-job Docker networks with health/startup checks. |
+| Matrix expansion | Supported | Static GitHub and Azure matrices expand into deterministic job instances. |
+| Deployment environments and OIDC | Partial | Deployment approvals and clearly marked mock OIDC are locally emulated; real cloud identity is never produced. |
 
-Unsupported step-level actions are normally logged and skipped. Unsupported job-level execution models can fail the job before its first step.
+Unsupported actions and tasks produce actionable failures rather than being silently skipped. Unsupported job-level execution models can fail before the first step.
 
 ## GitHub Actions
 
@@ -53,8 +53,8 @@ Piper recursively discovers `.yml` and `.yaml` files below:
 | `actions/setup-dotnet@...` | Partial | Chooses a .NET SDK image; `DOTNET_ROLL_FORWARD=Major` is set for local compatibility. |
 | `workflow_dispatch` inputs | Partial | Parsed for metadata; users enter values manually in Piper. |
 | Other triggers | Partial | Parsed for display only. |
-| Job `if` | Partial | Displayed but not evaluated. |
-| Expressions inside scripts or env | Partial | Passed through rather than evaluated. |
+| Job/step `if` | Supported | Common status, boolean, comparison, string, context, and output expressions are evaluated. |
+| Expressions inside scripts or env | Partial | Supported `${{ }}` values are interpolated immediately before execution. |
 
 Only one setup-runtime image can represent a job. A job that requires conflicting Node and .NET images, or multiple conflicting versions, fails image resolution.
 
@@ -64,11 +64,11 @@ Only one setup-runtime image can represent a job. A job that requires conflictin
 | --- | --- |
 | Reusable workflow job using `jobs.<id>.uses` | Reported as unsupported; job execution fails. |
 | Job `container` | Reported as unsupported; job execution fails. |
-| Job `services` | Reported as unsupported; job execution fails. |
-| Job `strategy`/matrix | Reported as unsupported; job execution fails. |
-| Other `uses` actions | Logged as unsupported and skipped. |
+| Job `services` | Started on an isolated job network. |
+| Job `strategy`/matrix | Static dimensions, include/exclude, fail-fast metadata, and max-parallel are normalized. |
+| Other `uses` actions | Local and consented remote JavaScript/composite actions plus `docker://` actions execute; Dockerfile actions and unsupported runtimes fail visibly. |
 | `workflow_call` execution | Reported as unsupported. |
-| Action caches, artifacts, permissions, concurrency, environments, OIDC | Not emulated. |
+| Permissions and provider concurrency groups | Reported but not reproduced exactly. |
 
 Workflow-level `env` is not currently mapped into the neutral job model. Put values at job or step level, or enter them in Piper's Environment field.
 
@@ -98,7 +98,7 @@ It does not search other filenames or resolve `include`.
 | `script` | Supported | Combined into a Bash step. |
 | Global and job `before_script` | Partial | Executed as additional Bash steps. |
 | Global and job `after_script` | Partial | Executed as ordinary Bash steps only if earlier steps succeeded. |
-| `rules`, `only`, and `except` | Partial | Preserved as condition text but not evaluated. |
+| `rules`, `only`, and `except` | Partial | Common variable, branch/tag, and local changed-file forms are evaluated. |
 | `workflow: rules` | Partial | Displayed but not evaluated. |
 | Pipeline source | Partial | User event becomes `CI_PIPELINE_SOURCE`. |
 
@@ -108,12 +108,13 @@ The selected image must provide `/bin/bash`. A common GitLab image such as Alpin
 
 | GitLab feature | Local result |
 | --- | --- |
-| `include` | Reported but not resolved. |
-| `extends` and hidden templates | Reported but not expanded. |
-| `services` | Reported as unsupported; job execution fails. |
+| Local `include` | Resolved recursively with include-cycle detection. |
+| Remote/project/template `include` | Reported but not fetched without a future consent-aware resolver. |
+| `extends` and hidden templates | Resolved with reverse deep merging and cycle detection. |
+| `services` | Locally emulated on a per-job Docker network. |
 | `parallel` or matrix | Reported as unsupported; job execution fails. |
 | `trigger` child or multi-project pipeline | Reported as unsupported; job execution fails. |
-| `artifacts`, `cache`, `dependencies` | Reported but not emulated. |
+| `artifacts`, `cache`, `dependencies` | Common artifacts and caches use Piper-managed local storage. |
 | `environment`, `resource_group`, `coverage`, `retry`, `timeout` | Reported but not emulated. |
 | `allow_failure` | Displayed but does not change the local conclusion. |
 
@@ -154,7 +155,7 @@ pipelines/
 | `workingDirectory` | Supported | Resolved below `/workspace`. |
 | Step `env` | Partial | Added without Azure expression expansion. |
 | `checkout` | Partial | Successful no-op because the repository is mounted. |
-| Job `condition` | Partial | Displayed but not evaluated. |
+| Job/step `condition` | Supported | Common status, equality, and boolean functions are evaluated. |
 | Triggers, PRs, and schedules | Partial | Parsed for display; local event remains user-controlled. |
 | `parameters` | Partial | Shown in YAML but not evaluated with template semantics. |
 
@@ -164,15 +165,15 @@ Stage job IDs are represented as `<stage>.<job>` so dependencies remain unique.
 
 | Azure feature | Local result |
 | --- | --- |
-| `task` steps | Logged as unsupported and skipped. |
+| `task` steps | Bash, PowerShell, CmdLine, Node, artifact, and cache handlers are locally supported; unknown tasks fail. |
 | Step templates | Reported and skipped; templates are not expanded. |
-| PowerShell/`pwsh` steps | Reported and skipped. |
+| PowerShell/`pwsh` steps | Execute when `pwsh` exists in the selected container. |
 | Root `extends` template | Reported but not expanded. |
 | `resources` | Reported; repositories, pipelines, packages, and containers are not fetched. |
 | Deployment jobs | Parsed for visibility but not executed with deployment semantics; their strategy causes local execution to fail. |
 | Job `container` | Reported as unsupported; job execution fails. |
-| Job `services` | Reported as unsupported; job execution fails. |
-| Job `strategy` | Reported as unsupported; job execution fails. |
+| Job `services` | Locally emulated on the job network. |
+| Matrix job `strategy` | Named Azure matrix legs expand locally. |
 | `timeoutInMinutes` | Displayed but not enforced. |
 | `continueOnError` | Displayed but does not change the local conclusion. |
 
@@ -198,7 +199,7 @@ The combined workflow badge answers “does every recognized feature have local 
 
 Typical outcomes:
 
-- An unsupported external action is skipped and later shell steps continue.
+- An unsupported external action fails its job with an actionable message.
 - An unsupported artifact declaration is reported, but shell steps still run.
 - A service container or matrix strategy fails the job before steps begin.
 - An invalid graph blocks the run completely.

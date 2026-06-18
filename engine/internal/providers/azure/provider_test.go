@@ -51,8 +51,8 @@ stages:
 	if got := workflow.Jobs[1].Needs; len(got) != 1 || got[0] != "Build.compile" {
 		t.Fatalf("package needs = %v, want [Build.compile]", got)
 	}
-	if workflow.Jobs[1].Support != model.SupportUnsupported {
-		t.Fatalf("package support = %s, want unsupported task", workflow.Jobs[1].Support)
+	if workflow.Jobs[1].Support != model.SupportPartial {
+		t.Fatalf("package support = %s, want partial task support", workflow.Jobs[1].Support)
 	}
 	if got := workflow.Jobs[2].Needs; len(got) != 2 || got[0] != "Build.compile" || got[1] != "Build.package" {
 		t.Fatalf("test implicit stage needs = %v, want build stage jobs", got)

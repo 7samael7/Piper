@@ -45,8 +45,8 @@ jobs:
 	if workflow.Jobs[0].Steps[0].Support != model.SupportPartial {
 		t.Fatalf("checkout support = %s, want partial", workflow.Jobs[0].Steps[0].Support)
 	}
-	if workflow.Jobs[1].Support != model.SupportUnsupported {
-		t.Fatalf("deploy support = %s, want unsupported", workflow.Jobs[1].Support)
+	if workflow.Jobs[1].Support != model.SupportPartial {
+		t.Fatalf("deploy support = %s, want partial", workflow.Jobs[1].Support)
 	}
 }
 

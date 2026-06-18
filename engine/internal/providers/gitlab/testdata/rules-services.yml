@@ -1,0 +1,14 @@
+stages: [test]
+test:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  services:
+    - name: postgres:16
+      alias: db
+  cache:
+    key: dependencies
+    paths: [vendor]
+  artifacts:
+    name: reports
+    paths: [reports]
+  script: echo test

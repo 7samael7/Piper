@@ -251,7 +251,7 @@ The `false` values intentionally signal that this is not the real hosted environ
 
 Select **Run Workflow** to execute every parsed job in dependency order.
 
-Piper executes jobs sequentially, even when multiple jobs could run in parallel. A job failure stops the run immediately; downstream jobs do not run.
+Piper runs dependency-ready jobs concurrently up to the configured limit. Failures do not stop unrelated jobs; downstream conditions determine whether dependents run or are skipped.
 
 ### Running one job
 
@@ -386,15 +386,15 @@ The selected image does not contain Bash. Alpine images commonly have `/bin/sh` 
 
 ### A `${{ ... }}` expression fails or prints literally
 
-Provider expression languages are not evaluated. Pass the value through Piper's Inputs, Environment, or Secrets fields and reference the resulting shell environment variable instead.
+Common provider expressions are evaluated and `${{ }}` values are interpolated before execution. Unsupported syntax produces a structured evaluation error.
 
 ### A conditional job ran unexpectedly
 
-Conditions and trigger rules are not enforced. Piper runs the parsed dependency graph without evaluating GitHub `if`, GitLab `rules`/`only`/`except`, or Azure `condition`.
+Common GitHub `if`, GitLab `rules`/`only`/`except`, and Azure `condition` forms are evaluated. The graph and inspector show results and skip reasons.
 
 ### An external action or task did not run
 
-Most GitHub actions and Azure tasks are skipped. The exceptions are checkout no-ops and the limited GitHub Node/.NET setup approximations. Replace the action with shell commands for a meaningful local run.
+Unsupported GitHub actions and Azure tasks fail visibly. Local and consented remote JavaScript/composite actions plus common Azure script, Node, artifact, and cache tasks have local handlers.
 
 ### A job fails before its first step
 
