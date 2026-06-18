@@ -1,0 +1,15 @@
+jobs:
+  - job: test
+    strategy:
+      maxParallel: 2
+      matrix:
+        linux:
+          NODE_VERSION: "20"
+        current:
+          NODE_VERSION: "22"
+    steps:
+      - pwsh: Write-Output "Node $env:NODE_VERSION"
+      - task: Cache@2
+        inputs:
+          key: npm
+          path: .npm

@@ -665,7 +665,8 @@ button {
 
 .support-unsupported,
 .status-failed,
-.status-cancelled {
+.status-cancelled,
+.status-skipped {
   border: 1px solid #d9897f;
   background: #fff0ed;
   color: #9a3026;
@@ -682,6 +683,27 @@ button {
   font-size: 13px;
   font-weight: 850;
   text-align: center;
+}
+
+.flow-node.status-queued {
+  box-shadow: inset 4px 0 #8c928d;
+}
+
+.flow-node.status-running {
+  box-shadow: inset 4px 0 #2f73c9;
+}
+
+.flow-node.status-succeeded {
+  box-shadow: inset 4px 0 #2f8a55;
+}
+
+.flow-node.status-failed {
+  box-shadow: inset 4px 0 #c5483d;
+}
+
+.flow-node.status-cancelled,
+.flow-node.status-skipped {
+  opacity: 0.62;
 }
 
 .support-node-supported {

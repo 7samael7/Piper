@@ -51,8 +51,8 @@ deploy:
 	if got := workflow.Jobs[1].Needs; len(got) != 1 || got[0] != "build" {
 		t.Fatalf("test needs = %v, want [build]", got)
 	}
-	if workflow.Jobs[1].Support != model.SupportUnsupported {
-		t.Fatalf("test support = %s, want unsupported", workflow.Jobs[1].Support)
+	if workflow.Jobs[1].Support != model.SupportSupported {
+		t.Fatalf("test support = %s, want supported services", workflow.Jobs[1].Support)
 	}
 	if workflow.Jobs[2].If == "" {
 		t.Fatal("expected deploy rules to be captured as condition text")

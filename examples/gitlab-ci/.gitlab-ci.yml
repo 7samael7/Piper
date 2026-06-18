@@ -3,7 +3,7 @@ stages:
   - test
   - deploy
 
-image: alpine:3.20
+image: ubuntu:22.04
 
 variables:
   APP_ENV: local
@@ -18,9 +18,22 @@ test:
   stage: test
   needs:
     - build
+  services:
+    - name: redis:7
+      alias: redis
+  cache:
+    key: example-cache
+    paths:
+      - .cache
   script:
+    - mkdir -p .cache reports
     - echo "Running tests"
     - echo "APP_ENV=$APP_ENV"
+    - echo "ok" > reports/result.txt
+  artifacts:
+    name: test-reports
+    paths:
+      - reports
 
 deploy:
   stage: deploy

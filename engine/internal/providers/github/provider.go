@@ -11,7 +11,9 @@ import (
 
 	"github.com/7samael7/Piper/engine/internal/pipeline/graph"
 	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/pipeline/plan"
 	"github.com/7samael7/Piper/engine/internal/pipeline/validation"
+	"github.com/7samael7/Piper/engine/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -87,7 +89,10 @@ func (p *Provider) Load(ctx context.Context, repoPath, workflowPath string) (*mo
 	if filepath.IsAbs(cleanPath) {
 		return nil, nil, fmt.Errorf("workflow path must be relative to the repository")
 	}
-	fullPath := filepath.Join(repoPath, cleanPath)
+	fullPath, err := workspace.Resolve(repoPath, cleanPath)
+	if err != nil {
+		return nil, nil, err
+	}
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
 		return nil, nil, err
@@ -101,6 +106,13 @@ func (p *Provider) Load(ctx context.Context, repoPath, workflowPath string) (*mo
 	workflow.Validation = p.Validate(ctx, workflow)
 	workflow.Valid = workflow.Validation.Valid
 	workflow.Support = workflow.Validation.Support
+	if workflow.Valid {
+		if executionPlan, compileErr := plan.Compile(workflow, plan.DefaultMaxExpandedJobs, plan.DefaultConcurrency); compileErr == nil {
+			workflow.ExecutionPlan = executionPlan
+			workflow.Graph = graph.BuildExecutionPlan(executionPlan)
+			workflow.JobCount = len(executionPlan.Jobs)
+		}
+	}
 	return workflow, content, nil
 }
 
@@ -123,7 +135,7 @@ func parseWorkflow(path string, content []byte) (*model.Workflow, error) {
 		name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 
-	jobs, err := parseJobs(mappingValue(root, "jobs"))
+	jobs, err := parseJobs(mappingValue(root, "jobs"), parseStringMap(mappingValue(root, "env")))
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +211,7 @@ func parseWorkflowDispatchInputs(node *yaml.Node) []model.TriggerInput {
 	return inputs
 }
 
-func parseJobs(node *yaml.Node) ([]model.Job, error) {
+func parseJobs(node *yaml.Node, workflowEnv map[string]string) ([]model.Job, error) {
 	if node == nil {
 		return []model.Job{}, nil
 	}
@@ -217,14 +229,20 @@ func parseJobs(node *yaml.Node) ([]model.Job, error) {
 		steps := parseSteps(mappingValue(body, "steps"))
 		applyRunDefaults(steps, mappingValue(body, "defaults"))
 		job := model.Job{
-			ID:      id,
-			Name:    scalarString(mappingValue(body, "name")),
-			Runner:  scalarOrListString(mappingValue(body, "runs-on")),
-			Needs:   parseStringSlice(mappingValue(body, "needs")),
-			If:      scalarString(mappingValue(body, "if")),
-			Env:     parseStringMap(mappingValue(body, "env")),
-			Steps:   steps,
-			Support: model.SupportSupported,
+			ID:          id,
+			Name:        scalarString(mappingValue(body, "name")),
+			Runner:      scalarOrListString(mappingValue(body, "runs-on")),
+			Needs:       parseStringSlice(mappingValue(body, "needs")),
+			If:          scalarString(mappingValue(body, "if")),
+			Env:         mergeStringMaps(workflowEnv, parseStringMap(mappingValue(body, "env"))),
+			Outputs:     parseStringMap(mappingValue(body, "outputs")),
+			Environment: environmentName(mappingValue(body, "environment")),
+			Steps:       steps,
+			Support:     model.SupportSupported,
+			Origin:      &model.SourceOrigin{Line: node.Content[i].Line, Column: node.Content[i].Column},
+		}
+		if job.If != "" {
+			job.Condition = &model.ConditionSpec{Provider: model.ProviderGitHub, Original: job.If, Kind: "if"}
 		}
 		if job.Name == "" {
 			job.Name = id
@@ -234,9 +252,10 @@ func parseJobs(node *yaml.Node) ([]model.Job, error) {
 			job.Support = model.SupportUnsupported
 		}
 		job.HasContainer = mappingValue(body, "container") != nil
-		job.HasServices = mappingValue(body, "services") != nil
-		job.HasStrategy = mappingValue(body, "strategy") != nil
-		if job.HasContainer || job.HasServices || job.HasStrategy {
+		job.Services = parseServices(mappingValue(body, "services"))
+		job.HasServices = len(job.Services) > 0
+		job.Matrix, job.HasStrategy = parseStrategy(mappingValue(body, "strategy"))
+		if job.HasContainer || (job.HasStrategy && job.Matrix == nil) {
 			job.Support = model.SupportUnsupported
 		}
 		if job.If != "" {
@@ -271,9 +290,15 @@ func parseSteps(node *yaml.Node) []model.Step {
 			Run:              scalarString(mappingValue(item, "run")),
 			Shell:            scalarString(mappingValue(item, "shell")),
 			WorkingDirectory: scalarString(mappingValue(item, "working-directory")),
+			If:               scalarString(mappingValue(item, "if")),
 			Env:              parseStringMap(mappingValue(item, "env")),
 			With:             parseStringMap(mappingValue(item, "with")),
+			ContinueOnError:  scalarBool(mappingValue(item, "continue-on-error")),
+			Origin:           &model.SourceOrigin{Line: item.Line, Column: item.Column},
 			Support:          model.SupportSupported,
+		}
+		if step.If != "" {
+			step.Condition = &model.ConditionSpec{Provider: model.ProviderGitHub, Original: step.If, Kind: "if"}
 		}
 		if step.Name == "" {
 			switch {
@@ -291,6 +316,8 @@ func parseSteps(node *yaml.Node) []model.Step {
 		case strings.HasPrefix(step.Uses, "actions/checkout@"):
 			step.Support = model.SupportPartial
 		case strings.HasPrefix(step.Uses, "actions/setup-dotnet@"), strings.HasPrefix(step.Uses, "actions/setup-node@"):
+			step.Support = model.SupportPartial
+		case strings.HasPrefix(step.Uses, "./"), strings.Contains(step.Uses, "@"):
 			step.Support = model.SupportPartial
 		case step.Uses != "":
 			step.Support = model.SupportUnsupported
@@ -393,6 +420,124 @@ func parseStringMap(node *yaml.Node) map[string]string {
 		values[node.Content[i].Value] = scalarString(node.Content[i+1])
 	}
 	return values
+}
+
+func parseStrategy(node *yaml.Node) (*model.MatrixSpec, bool) {
+	if node == nil {
+		return nil, false
+	}
+	matrixNode := mappingValue(node, "matrix")
+	if matrixNode == nil || matrixNode.Kind != yaml.MappingNode {
+		return nil, true
+	}
+	spec := &model.MatrixSpec{
+		Dimensions: map[string][]interface{}{},
+		FailFast:   true,
+	}
+	if failFast := mappingValue(node, "fail-fast"); failFast != nil {
+		spec.FailFast = scalarBool(failFast)
+	}
+	if maxParallel := mappingValue(node, "max-parallel"); maxParallel != nil {
+		fmt.Sscanf(scalarString(maxParallel), "%d", &spec.MaxParallel)
+	}
+	for i := 0; i+1 < len(matrixNode.Content); i += 2 {
+		key := matrixNode.Content[i].Value
+		value := matrixNode.Content[i+1]
+		switch key {
+		case "include":
+			spec.Include = parseObjectList(value)
+		case "exclude":
+			spec.Exclude = parseObjectList(value)
+		default:
+			if value.Kind == yaml.SequenceNode {
+				items := make([]interface{}, 0, len(value.Content))
+				for _, item := range value.Content {
+					items = append(items, yamlValue(item))
+				}
+				spec.Dimensions[key] = items
+			}
+		}
+	}
+	return spec, true
+}
+
+func parseServices(node *yaml.Node) []model.ServiceSpec {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	services := make([]model.ServiceSpec, 0, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		name := node.Content[i].Value
+		body := node.Content[i+1]
+		service := model.ServiceSpec{Name: name, Image: scalarString(body), Aliases: []string{name}, StartupTimeout: 60}
+		if body.Kind == yaml.MappingNode {
+			service.Image = scalarString(mappingValue(body, "image"))
+			service.Env = parseStringMap(mappingValue(body, "env"))
+			service.Ports = parseStringSlice(mappingValue(body, "ports"))
+			service.Options = scalarString(mappingValue(body, "options"))
+		}
+		if service.Image != "" {
+			services = append(services, service)
+		}
+	}
+	return services
+}
+
+func parseObjectList(node *yaml.Node) []map[string]interface{} {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return nil
+	}
+	result := make([]map[string]interface{}, 0, len(node.Content))
+	for _, item := range node.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		values := map[string]interface{}{}
+		for i := 0; i+1 < len(item.Content); i += 2 {
+			values[item.Content[i].Value] = yamlValue(item.Content[i+1])
+		}
+		result = append(result, values)
+	}
+	return result
+}
+
+func yamlValue(node *yaml.Node) interface{} {
+	if node == nil {
+		return nil
+	}
+	if node.Kind != yaml.ScalarNode {
+		return scalarString(node)
+	}
+	switch node.Tag {
+	case "!!bool":
+		return scalarBool(node)
+	case "!!int":
+		var value int
+		if _, err := fmt.Sscanf(node.Value, "%d", &value); err == nil {
+			return value
+		}
+	}
+	return node.Value
+}
+
+func mergeStringMaps(values ...map[string]string) map[string]string {
+	var result map[string]string
+	for _, entries := range values {
+		for key, value := range entries {
+			if result == nil {
+				result = map[string]string{}
+			}
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func environmentName(node *yaml.Node) string {
+	if node != nil && node.Kind == yaml.MappingNode {
+		return scalarString(mappingValue(node, "name"))
+	}
+	return scalarString(node)
 }
 
 func yamlToString(node *yaml.Node) string {

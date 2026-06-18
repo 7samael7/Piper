@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, FolderOpen, Play, RefreshCw, Square, Workflow } from "lucide-react";
-import type { ProviderID, ProviderInfo, RunRecord, RunStartResponse, WorkflowDetails, WorkflowSummary } from "@piper/shared-types";
+import type {
+  ArtifactRecord,
+  CacheRecord,
+  PiperSettings,
+  ProviderID,
+  ProviderInfo,
+  RunPreparation,
+  RunRecord,
+  RunStartResponse,
+  WorkflowDetails,
+  WorkflowSummary,
+} from "@piper/shared-types";
 import piperLogo from "../../assets/piper.png";
 import { useEngineEvents } from "./hooks/useEngineEvents";
 import { usePiperStore } from "./store/piperStore";
@@ -14,12 +25,15 @@ import { WorkflowGraph } from "./components/WorkflowGraph";
 
 export function App() {
   useEngineEvents();
+  const queryClient = useQueryClient();
   const repoPath = usePiperStore((state) => state.repoPath);
   const selectedProvider = usePiperStore((state) => state.selectedProvider);
   const selectedWorkflowPath = usePiperStore((state) => state.selectedWorkflowPath);
   const selectedJobId = usePiperStore((state) => state.selectedJobId);
   const activeRunId = usePiperStore((state) => state.activeRunId);
   const runEvents = usePiperStore((state) => state.runEvents);
+  const jobStates = usePiperStore((state) => state.jobStates);
+  const stepStates = usePiperStore((state) => state.stepStates);
   const setRepoPath = usePiperStore((state) => state.setRepoPath);
   const setSelectedProvider = usePiperStore((state) => state.setSelectedProvider);
   const setSelectedWorkflowPath = usePiperStore((state) => state.setSelectedWorkflowPath);
@@ -100,9 +114,27 @@ export function App() {
       }),
   });
 
+  const artifactsQuery = useQuery({
+    queryKey: ["artifacts", activeRunId],
+    queryFn: () => window.piper.request<ArtifactRecord[]>("artifact.list", activeRunId ? { runId: activeRunId } : {}),
+  });
+
+  const cachesQuery = useQuery({
+    queryKey: ["caches"],
+    queryFn: () => window.piper.request<CacheRecord[]>("cache.list", {}),
+  });
+
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => window.piper.request<PiperSettings>("settings.get"),
+  });
+
   const selectedWorkflow = workflowQuery.data;
   const selectedJob = useMemo(
-    () => selectedWorkflow?.jobs.find((job) => job.id === selectedJobId),
+    () => {
+      const logicalId = selectedWorkflow?.executionPlan?.jobs.find((job) => job.id === selectedJobId)?.logicalJobId ?? selectedJobId;
+      return selectedWorkflow?.jobs.find((job) => job.id === logicalId);
+    },
     [selectedJobId, selectedWorkflow],
   );
 
@@ -112,7 +144,7 @@ export function App() {
         throw new Error("A repository and workflow are required.");
       }
       clearRunEvents();
-      const response = await window.piper.request<RunStartResponse>("run.start", {
+      const baseRequest = {
         repoPath,
         workflowPath: selectedWorkflowPath,
         provider: selectedProvider,
@@ -121,6 +153,33 @@ export function App() {
         inputs: parseKeyValueText(inputsText),
         env: parseKeyValueText(envText),
         secrets: parseKeyValueText(secretsText),
+      };
+      let preparation = await window.piper.request<RunPreparation>("run.prepare", baseRequest);
+      if (preparation.requiresConsent) {
+        const accepted = window.confirm(
+          "This workflow contains third-party actions. Piper will download and execute their code locally. Continue?",
+        );
+        if (!accepted) {
+          throw new Error("Third-party action execution was not approved.");
+        }
+        preparation = await window.piper.request<RunPreparation>("run.prepare", {
+          ...baseRequest,
+          allowThirdPartyCode: true,
+        });
+        if (selectedWorkflow && window.confirm("Remember these action references as trusted for this repository?")) {
+          const references = selectedWorkflow.jobs
+            .flatMap((job) => job.steps.map((step) => step.uses))
+            .filter((uses): uses is string =>
+              Boolean(uses && uses.includes("@") && !uses.startsWith("./") && !isBuiltinActionReference(uses)),
+            );
+          await Promise.all(references.map((reference) =>
+            window.piper.request("trust.update", { repoPath, reference, trusted: true }),
+          ));
+        }
+      }
+      const response = await window.piper.request<RunStartResponse>("run.start", {
+        ...baseRequest,
+        preparedToken: preparation.preparedToken,
       });
       setActiveRunId(response.runId);
       return response;
@@ -138,6 +197,27 @@ export function App() {
       await window.piper.request("run.cancel", { runId: activeRunId });
     },
   });
+
+  const approvalMutation = useMutation({
+    mutationFn: (approved: boolean) =>
+      window.piper.request(approved ? "run.approve" : "run.reject", { runId: activeRunId }),
+  });
+
+  const clearCachesMutation = useMutation({
+    mutationFn: () => window.piper.request("cache.clear", {}),
+    onSuccess: () => void cachesQuery.refetch(),
+  });
+
+  const settingsMutation = useMutation({
+    mutationFn: (settings: PiperSettings) => window.piper.request<PiperSettings>("settings.update", settings),
+    onSuccess: (settings) => queryClient.setQueryData(["settings"], settings),
+  });
+
+  const pendingApproval = [...runEvents]
+    .reverse()
+    .find((event) => event.type === "approval_required" && !runEvents.some((later) =>
+      later.time > event.time && (later.type === "approval_granted" || later.type === "job_skipped") && later.jobId === event.jobId,
+    ));
 
   const openRepository = async () => {
     const selectedPath = await window.piper.openRepository();
@@ -254,6 +334,12 @@ export function App() {
               <Square size={15} />
               Cancel
             </button>
+            {pendingApproval ? (
+              <>
+                <button className="secondary-button" onClick={() => approvalMutation.mutate(true)}>Approve</button>
+                <button className="danger-button" onClick={() => approvalMutation.mutate(false)}>Reject</button>
+              </>
+            ) : null}
           </div>
         </header>
 
@@ -267,9 +353,65 @@ export function App() {
 
         <section className="workspace-grid">
           <div className="graph-panel">
-            <WorkflowGraph workflow={selectedWorkflow} selectedJobId={selectedJobId} onSelectJob={setSelectedJobId} />
+            <WorkflowGraph workflow={selectedWorkflow} selectedJobId={selectedJobId} onSelectJob={setSelectedJobId} jobStates={jobStates} />
           </div>
-          <JobInspector workflow={selectedWorkflow} selectedJobId={selectedJobId} />
+          <JobInspector workflow={selectedWorkflow} selectedJobId={selectedJobId} jobStates={jobStates} stepStates={stepStates} />
+        </section>
+
+        <section className="config-strip">
+          <div>
+            <strong>Artifacts</strong>
+            {(artifactsQuery.data ?? []).length === 0 ? <p className="muted">No local artifacts.</p> : null}
+            {(artifactsQuery.data ?? []).map((artifact) => (
+              <button className="secondary-button" key={artifact.id} onClick={() => window.piper.revealArtifact(artifact.id)}>
+                {artifact.name} ({formatBytes(artifact.size)})
+              </button>
+            ))}
+          </div>
+          <div>
+            <strong>Caches</strong>
+            <p className="muted">{(cachesQuery.data ?? []).length} entries</p>
+            <button className="secondary-button" onClick={() => clearCachesMutation.mutate()}>Clear caches</button>
+          </div>
+          <div>
+            <strong>Execution settings</strong>
+            {settingsQuery.data ? (
+              <div className="meta-grid">
+                <span>Jobs</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={64}
+                  value={settingsQuery.data.concurrency}
+                  onChange={(event) => settingsMutation.mutate({ ...settingsQuery.data!, concurrency: Number(event.target.value) })}
+                />
+                <span>Workspace</span>
+                <select
+                  value={settingsQuery.data.workspaceMode}
+                  onChange={(event) => settingsMutation.mutate({
+                    ...settingsQuery.data!,
+                    workspaceMode: event.target.value as PiperSettings["workspaceMode"],
+                  })}
+                >
+                  <option value="isolated">isolated</option>
+                  <option value="read-only">read-only</option>
+                  <option value="writable">writable</option>
+                </select>
+                <span>Network</span>
+                <select
+                  value={settingsQuery.data.networkAccess}
+                  onChange={(event) => settingsMutation.mutate({
+                    ...settingsQuery.data!,
+                    networkAccess: event.target.value as PiperSettings["networkAccess"],
+                  })}
+                >
+                  <option value="enabled">enabled</option>
+                  <option value="internal">internal</option>
+                  <option value="disabled">disabled</option>
+                </select>
+              </div>
+            ) : <p className="muted">Loading…</p>}
+          </div>
         </section>
 
         <section className="logs-panel">
@@ -282,6 +424,20 @@ export function App() {
       </main>
     </div>
   );
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isBuiltinActionReference(reference: string) {
+  return reference.startsWith("actions/checkout@") ||
+    reference.startsWith("actions/setup-") ||
+    reference.startsWith("actions/upload-artifact@") ||
+    reference.startsWith("actions/download-artifact@") ||
+    reference.startsWith("actions/cache@");
 }
 
 const fallbackProviders: ProviderInfo[] = [

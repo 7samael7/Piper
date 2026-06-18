@@ -11,8 +11,10 @@ import (
 
 	"github.com/7samael7/Piper/engine/internal/pipeline/graph"
 	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/pipeline/plan"
 	"github.com/7samael7/Piper/engine/internal/pipeline/validation"
 	"github.com/7samael7/Piper/engine/internal/providers/yamlutil"
+	"github.com/7samael7/Piper/engine/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,7 +60,11 @@ func (p *Provider) Load(ctx context.Context, repoPath, workflowPath string) (*mo
 	if filepath.IsAbs(cleanPath) {
 		return nil, nil, fmt.Errorf("workflow path must be relative to the repository")
 	}
-	content, err := os.ReadFile(filepath.Join(repoPath, cleanPath))
+	fullPath, err := workspace.Resolve(repoPath, cleanPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	content, err := os.ReadFile(fullPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -70,6 +76,13 @@ func (p *Provider) Load(ctx context.Context, repoPath, workflowPath string) (*mo
 	workflow.Validation = p.Validate(ctx, workflow)
 	workflow.Valid = workflow.Validation.Valid
 	workflow.Support = workflow.Validation.Support
+	if workflow.Valid {
+		if executionPlan, compileErr := plan.Compile(workflow, plan.DefaultMaxExpandedJobs, plan.DefaultConcurrency); compileErr == nil {
+			workflow.ExecutionPlan = executionPlan
+			workflow.Graph = graph.BuildExecutionPlan(executionPlan)
+			workflow.JobCount = len(executionPlan.Jobs)
+		}
+	}
 	return workflow, content, nil
 }
 
@@ -281,22 +294,35 @@ func parseJobsNode(node *yaml.Node, stageID string, stageIndex int, stageDepends
 		}
 		rawNeeds, explicitNeeds := parseDependsOn(yamlutil.MappingValue(item, "dependsOn"))
 		job := model.Job{
-			ID:      fullID,
-			Name:    firstNonEmpty(yamlutil.ScalarString(yamlutil.MappingValue(item, "displayName")), jobID),
-			Runner:  pool,
-			Stage:   stageID,
-			Needs:   []string{},
-			If:      yamlutil.ScalarString(yamlutil.MappingValue(item, "condition")),
-			Env:     yamlutil.MergeStringMaps(inheritedVariables, parseVariables(yamlutil.MappingValue(item, "variables"))),
-			Steps:   parseAzureJobSteps(item, fullID, isDeployment),
-			Support: model.SupportSupported,
+			ID:           fullID,
+			Name:         firstNonEmpty(yamlutil.ScalarString(yamlutil.MappingValue(item, "displayName")), jobID),
+			Runner:       pool,
+			Stage:        stageID,
+			Needs:        []string{},
+			If:           yamlutil.ScalarString(yamlutil.MappingValue(item, "condition")),
+			Env:          yamlutil.MergeStringMaps(inheritedVariables, parseVariables(yamlutil.MappingValue(item, "variables"))),
+			Steps:        parseAzureJobSteps(item, fullID, isDeployment),
+			Support:      model.SupportSupported,
+			AllowFailure: yamlutil.ScalarBool(yamlutil.MappingValue(item, "continueOnError")),
+			Environment:  yamlutil.ScalarString(yamlutil.MappingValue(item, "environment")),
+			Origin:       &model.SourceOrigin{Line: item.Line, Column: item.Column},
+		}
+		if job.If != "" {
+			job.Condition = &model.ConditionSpec{Provider: model.ProviderAzure, Original: job.If, Kind: "condition"}
 		}
 		job.HasContainer = yamlutil.HasKey(item, "container")
-		job.HasServices = yamlutil.HasKey(item, "services")
-		job.HasStrategy = yamlutil.HasKey(item, "strategy")
+		job.Services = parseServices(yamlutil.MappingValue(item, "services"))
+		job.HasServices = len(job.Services) > 0
+		job.Matrix, job.HasStrategy = parseStrategy(yamlutil.MappingValue(item, "strategy"))
+		if isDeployment {
+			job.HasStrategy = false
+		}
 		job.Unsupported = jobUnsupported(fullID, item, isDeployment)
-		if job.HasContainer || job.HasServices || job.HasStrategy || isDeployment {
+		if job.HasContainer || (job.HasStrategy && job.Matrix == nil) {
 			job.Support = model.SupportUnsupported
+		}
+		if isDeployment {
+			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
 		}
 		if job.If != "" {
 			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
@@ -408,7 +434,13 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 			Name:             firstNonEmpty(yamlutil.ScalarString(yamlutil.MappingValue(item, "displayName")), fmt.Sprintf("Step %d", index+1)),
 			Env:              yamlutil.StringMap(yamlutil.MappingValue(item, "env")),
 			WorkingDirectory: yamlutil.ScalarString(yamlutil.MappingValue(item, "workingDirectory")),
+			If:               yamlutil.ScalarString(yamlutil.MappingValue(item, "condition")),
+			ContinueOnError:  yamlutil.ScalarBool(yamlutil.MappingValue(item, "continueOnError")),
+			Origin:           &model.SourceOrigin{Line: item.Line, Column: item.Column},
 			Support:          model.SupportSupported,
+		}
+		if step.If != "" {
+			step.Condition = &model.ConditionSpec{Provider: model.ProviderAzure, Original: step.If, Kind: "condition"}
 		}
 		switch {
 		case yamlutil.HasKey(item, "bash"):
@@ -431,8 +463,11 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 			}
 		case yamlutil.HasKey(item, "task"):
 			step.Uses = yamlutil.ScalarString(yamlutil.MappingValue(item, "task"))
-			step.Support = model.SupportUnsupported
-			step.Unsupported = append(step.Unsupported, feature("Azure task", stepPath+".task", model.SupportUnsupported, "Azure task execution is not implemented in the MVP."))
+			step.With = yamlutil.StringMap(yamlutil.MappingValue(item, "inputs"))
+			normalizeAzureTask(&step)
+			if step.Run == "" && step.Support == model.SupportUnsupported {
+				step.Unsupported = append(step.Unsupported, feature("Azure task", stepPath+".task", model.SupportUnsupported, "No local handler is registered for this Azure task and version."))
+			}
 			if step.Name == fmt.Sprintf("Step %d", index+1) {
 				step.Name = step.Uses
 			}
@@ -444,9 +479,14 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 				step.Name = step.Uses
 			}
 		case yamlutil.HasKey(item, "pwsh"), yamlutil.HasKey(item, "powershell"):
-			step.Uses = "powershell"
-			step.Support = model.SupportUnsupported
-			step.Unsupported = append(step.Unsupported, feature("Azure PowerShell step", stepPath, model.SupportUnsupported, "PowerShell steps are reported but not executed by the MVP bash executor."))
+			if yamlutil.HasKey(item, "pwsh") {
+				step.Run = yamlutil.ScriptString(yamlutil.MappingValue(item, "pwsh"))
+				step.Shell = "pwsh"
+			} else {
+				step.Run = yamlutil.ScriptString(yamlutil.MappingValue(item, "powershell"))
+				step.Shell = "powershell"
+			}
+			step.Support = model.SupportPartial
 		default:
 			step.Support = model.SupportUnsupported
 			step.Unsupported = append(step.Unsupported, feature("Azure step", stepPath, model.SupportUnsupported, "This Azure step type is not implemented in the MVP."))
@@ -454,6 +494,78 @@ func parseSteps(node *yaml.Node, path string) []model.Step {
 		steps = append(steps, step)
 	}
 	return steps
+}
+
+func normalizeAzureTask(step *model.Step) {
+	task := strings.ToLower(step.Uses)
+	inputs := step.With
+	switch {
+	case strings.HasPrefix(task, "bash@"):
+		step.Run = firstNonEmpty(inputs["script"], inputs["inlineScript"], inputs["filePath"])
+		step.Shell = "bash"
+		step.Uses = ""
+		step.Support = model.SupportSupported
+	case strings.HasPrefix(task, "powershell@"):
+		step.Run = firstNonEmpty(inputs["script"], inputs["inlineScript"], inputs["filePath"])
+		step.Shell = "pwsh"
+		step.Uses = ""
+		step.Support = model.SupportPartial
+	case strings.HasPrefix(task, "cmdline@"):
+		step.Run = firstNonEmpty(inputs["script"], inputs["inlineScript"])
+		step.Shell = "bash"
+		step.Uses = ""
+		step.Support = model.SupportPartial
+	case strings.HasPrefix(task, "nodetool@"), strings.HasPrefix(task, "usenode@"):
+		step.Uses = "actions/setup-node@local"
+		step.With = map[string]string{"node-version": firstNonEmpty(inputs["versionSpec"], inputs["version"], "20")}
+		step.Support = model.SupportPartial
+	case strings.HasPrefix(task, "publishbuildartifacts@"),
+		strings.HasPrefix(task, "downloadbuildartifacts@"),
+		strings.HasPrefix(task, "cache@"):
+		step.Support = model.SupportPartial
+	default:
+		step.Support = model.SupportUnsupported
+	}
+}
+
+func parseStrategy(node *yaml.Node) (*model.MatrixSpec, bool) {
+	if node == nil {
+		return nil, false
+	}
+	matrix := yamlutil.MappingValue(node, "matrix")
+	if matrix == nil || matrix.Kind != yaml.MappingNode {
+		return nil, true
+	}
+	spec := &model.MatrixSpec{AzureLegs: map[string]map[string]string{}, FailFast: true}
+	for i := 0; i+1 < len(matrix.Content); i += 2 {
+		name := matrix.Content[i].Value
+		spec.AzureLegs[name] = yamlutil.StringMap(matrix.Content[i+1])
+	}
+	if maxParallel := yamlutil.ScalarString(yamlutil.MappingValue(node, "maxParallel")); maxParallel != "" {
+		fmt.Sscanf(maxParallel, "%d", &spec.MaxParallel)
+	}
+	return spec, true
+}
+
+func parseServices(node *yaml.Node) []model.ServiceSpec {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	services := []model.ServiceSpec{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		name := node.Content[i].Value
+		body := node.Content[i+1]
+		service := model.ServiceSpec{Name: name, Image: yamlutil.ScalarString(body), Aliases: []string{name}, StartupTimeout: 60}
+		if body.Kind == yaml.MappingNode {
+			service.Image = yamlutil.ScalarString(yamlutil.MappingValue(body, "image"))
+			service.Env = yamlutil.StringMap(yamlutil.MappingValue(body, "env"))
+			service.Ports = yamlutil.StringSlice(yamlutil.MappingValue(body, "ports"))
+		}
+		if service.Image != "" {
+			services = append(services, service)
+		}
+	}
+	return services
 }
 
 func parseDependsOn(node *yaml.Node) ([]string, bool) {
@@ -529,16 +641,20 @@ func jobUnsupported(id string, item *yaml.Node, isDeployment bool) []model.Featu
 	path := "jobs." + id
 	features := []model.FeatureSupport{}
 	if isDeployment {
-		features = append(features, feature("Azure deployment job", path, model.SupportUnsupported, "Deployment jobs are parsed for visibility but not executed with Azure environment semantics."))
+		features = append(features, feature("Azure deployment job", path, model.SupportPartial, "Deployment jobs use a local manual approval gate and internal-only network."))
 	}
 	if yamlutil.HasKey(item, "container") {
 		features = append(features, feature("Azure job container", path+".container", model.SupportUnsupported, "Azure job containers are not emulated by the MVP executor."))
 	}
 	if yamlutil.HasKey(item, "services") {
-		features = append(features, feature("Azure services", path+".services", model.SupportUnsupported, "Service containers are not started by the MVP executor."))
+		features = append(features, feature("Azure services", path+".services", model.SupportSupported, "Services run on an isolated per-job Docker network."))
 	}
 	if yamlutil.HasKey(item, "strategy") {
-		features = append(features, feature("Azure strategy", path+".strategy", model.SupportUnsupported, "Matrix and parallel strategies are not expanded locally."))
+		if matrix := yamlutil.MappingValue(yamlutil.MappingValue(item, "strategy"), "matrix"); matrix != nil {
+			features = append(features, feature("Azure matrix strategy", path+".strategy", model.SupportSupported, "Named matrix legs expand into local job instances."))
+		} else {
+			features = append(features, feature("Azure strategy", path+".strategy", model.SupportUnsupported, "This Azure strategy form is not implemented locally."))
+		}
 	}
 	if yamlutil.HasKey(item, "timeoutInMinutes") {
 		features = append(features, feature("Azure timeout", path+".timeoutInMinutes", model.SupportPartial, "Azure job timeouts are displayed but not enforced locally."))

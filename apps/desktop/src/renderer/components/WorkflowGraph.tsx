@@ -1,15 +1,17 @@
 import { Background, Controls, MiniMap, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import type { WorkflowDetails } from "@piper/shared-types";
 import { useMemo } from "react";
+import type { ExecutionState } from "../store/piperStore";
 
 interface WorkflowGraphProps {
   workflow?: WorkflowDetails;
   selectedJobId: string;
   onSelectJob: (jobId: string) => void;
+  jobStates: Record<string, ExecutionState>;
 }
 
-export function WorkflowGraph({ workflow, selectedJobId, onSelectJob }: WorkflowGraphProps) {
-  const { nodes, edges } = useMemo(() => toFlowElements(workflow), [workflow]);
+export function WorkflowGraph({ workflow, selectedJobId, onSelectJob, jobStates }: WorkflowGraphProps) {
+  const { nodes, edges } = useMemo(() => toFlowElements(workflow, jobStates), [jobStates, workflow]);
 
   if (!workflow) {
     return <div className="empty-state">Open a repository and select a workflow.</div>;
@@ -34,12 +36,18 @@ export function WorkflowGraph({ workflow, selectedJobId, onSelectJob }: Workflow
   );
 }
 
-function toFlowElements(workflow?: WorkflowDetails): { nodes: Node[]; edges: Edge[] } {
+function toFlowElements(workflow: WorkflowDetails | undefined, jobStates: Record<string, ExecutionState>): { nodes: Node[]; edges: Edge[] } {
   if (!workflow) {
     return { nodes: [], edges: [] };
   }
   const levels = new Map<string, number>();
-  const needsByJob = new Map(workflow.jobs.map((job) => [job.id, job.needs]));
+  const needsByJob = new Map<string, string[]>();
+  for (const node of workflow.graph.nodes) {
+    needsByJob.set(node.id, []);
+  }
+  for (const edge of workflow.graph.edges) {
+    needsByJob.get(edge.target)?.push(edge.source);
+  }
 
   const resolveLevel = (id: string): number => {
     if (levels.has(id)) {
@@ -56,11 +64,12 @@ function toFlowElements(workflow?: WorkflowDetails): { nodes: Node[]; edges: Edg
     const level = resolveLevel(node.id);
     const row = byLevel.get(level) ?? 0;
     byLevel.set(level, row + 1);
+    const state = jobStates[node.id];
     return {
       id: node.id,
       position: { x: level * 280, y: row * 126 },
-      data: { label: node.label },
-      className: `flow-node support-node-${node.support}`,
+      data: { label: `${node.label}${state?.status ? ` · ${state.status}` : ""}` },
+      className: `flow-node support-node-${node.support}${state?.status ? ` status-${state.status}` : ""}`,
       style: {
         width: 210,
         minHeight: 64,

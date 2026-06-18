@@ -56,6 +56,35 @@ type historyRequest struct {
 	Limit    int    `json:"limit,omitempty"`
 }
 
+type runGetRequest struct {
+	RunID string `json:"runId"`
+}
+
+type artifactListRequest struct {
+	RunID string `json:"runId,omitempty"`
+}
+
+type cacheRequest struct {
+	Scope string `json:"scope,omitempty"`
+}
+
+type prepareRequest struct {
+	model.RunRequest
+	AllowThirdPartyCode bool `json:"allowThirdPartyCode,omitempty"`
+	ApproveDeployments  bool `json:"approveDeployments,omitempty"`
+}
+
+type runDecisionRequest struct {
+	RunID string `json:"runId"`
+}
+
+type trustRequest struct {
+	RepoPath    string `json:"repoPath"`
+	Reference   string `json:"reference,omitempty"`
+	ResolvedSHA string `json:"resolvedSha,omitempty"`
+	Trusted     bool   `json:"trusted,omitempty"`
+}
+
 type providerInfo struct {
 	ID           model.ProviderID `json:"id"`
 	Name         string           `json:"name"`

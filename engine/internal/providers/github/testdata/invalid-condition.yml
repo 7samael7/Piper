@@ -1,0 +1,7 @@
+on: push
+jobs:
+  broken:
+    if: ${{ contains( }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo never

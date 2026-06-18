@@ -23,3 +23,24 @@ func (m Masker) Mask(input string) string {
 	}
 	return output
 }
+
+func (m Masker) MaskValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case string:
+		return m.Mask(typed)
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			result[key] = m.MaskValue(item)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, item := range typed {
+			result[index] = m.MaskValue(item)
+		}
+		return result
+	default:
+		return value
+	}
+}

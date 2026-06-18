@@ -25,13 +25,29 @@ stages:
     jobs:
       - job: unit
         displayName: Unit Tests
+        strategy:
+          matrix:
+            node20:
+              NODE_VERSION: "20"
+            node22:
+              NODE_VERSION: "22"
+          maxParallel: 2
         steps:
+          - task: Cache@2
+            inputs:
+              key: npm-$(NODE_VERSION)
+              path: .npm
           - script: |
               echo "Running unit tests"
               echo "CONFIGURATION=$CONFIGURATION"
+              mkdir -p dist
+              echo "$NODE_VERSION" > dist/version.txt
 
       - job: publish
         displayName: Publish Artifact Placeholder
         dependsOn: unit
         steps:
           - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: dist
+              artifactName: azure-example
