@@ -58,11 +58,21 @@ button {
 }
 
 .brand-row {
-  gap: 10px;
-  min-height: 34px;
-  font-size: 16px;
+  gap: 11px;
+  min-height: 50px;
+  font-size: 18px;
   font-weight: 800;
   color: #15392e;
+}
+
+.brand-logo {
+  width: 50px;
+  height: 50px;
+  flex: 0 0 50px;
+  border: 1px solid rgba(21, 57, 46, 0.12);
+  border-radius: 11px;
+  box-shadow: 0 3px 10px rgba(21, 57, 46, 0.1);
+  object-fit: cover;
 }
 
 .primary-button,

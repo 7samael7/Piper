@@ -5,6 +5,9 @@ import { MakerRpm } from "@electron-forge/maker-rpm";
 import { MakerSquirrel } from "@electron-forge/maker-squirrel";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { VitePlugin } from "@electron-forge/plugin-vite";
+import path from "node:path";
+
+const appIcon = path.resolve(__dirname, "assets/piper-app");
 
 const notarize =
   process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID
@@ -19,13 +22,16 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     appBundleId: "dev.piper.desktop",
-    extraResource: ["../../engine/bin/piper-engine", "update-config.json"],
+    icon: appIcon,
+    extraResource: ["../../engine/bin/piper-engine", "update-config.json", "assets/piper-app.png"],
     ...(process.env.APPLE_SIGN_IDENTITY ? { osxSign: { identity: process.env.APPLE_SIGN_IDENTITY } } : {}),
     ...(notarize ? { osxNotarize: notarize } : {}),
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      setupIcon: `${appIcon}.ico`,
+    }),
     new MakerZIP({}, ["darwin"]),
     new MakerDMG({
       format: "ULFO",

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Download, FolderOpen, GitBranch, Play, RefreshCw, Square, Workflow } from "lucide-react";
+import { Download, FolderOpen, Play, RefreshCw, Square, Workflow } from "lucide-react";
 import type { ProviderID, ProviderInfo, RunRecord, RunStartResponse, WorkflowDetails, WorkflowSummary } from "@piper/shared-types";
+import piperLogo from "../../assets/piper.png";
 import { useEngineEvents } from "./hooks/useEngineEvents";
 import { usePiperStore } from "./store/piperStore";
 import { JobInspector } from "./components/JobInspector";
@@ -153,7 +154,7 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-row">
-          <GitBranch size={21} />
+          <img className="brand-logo" src={piperLogo} alt="" />
           <span>Piper</span>
         </div>
         <button className="primary-button" onClick={openRepository}>

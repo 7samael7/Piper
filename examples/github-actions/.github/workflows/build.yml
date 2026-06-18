@@ -2,7 +2,7 @@ name: Example Build
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
     inputs:
       greeting:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Print environment
+        env:
+          INPUT_GREETING: ${{ inputs.greeting || 'Hello from Piper' }}
         run: |
           echo "Repository is mounted at $GITHUB_WORKSPACE"
           echo "Greeting: $INPUT_GREETING"

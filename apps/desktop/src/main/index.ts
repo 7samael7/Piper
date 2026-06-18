@@ -136,6 +136,7 @@ function createWindow() {
     minHeight: 760,
     title: "Piper",
     backgroundColor: "#f7f8f3",
+    icon: resolveWindowIcon(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -151,6 +152,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  setApplicationIcon();
   engine.start();
   ipcMain.handle("dialog.openRepository", async () => {
     const result = await dialog.showOpenDialog({
@@ -214,4 +216,16 @@ function resolveEngineCommand(): { command: string; args: string[]; cwd?: string
 
 function defaultDatabasePath() {
   return path.join(app.getPath("userData"), "piper.db");
+}
+
+function resolveWindowIcon() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "piper-app.png")
+    : path.resolve(__dirname, "../../assets/piper-app.png");
+}
+
+function setApplicationIcon() {
+  if (process.platform === "darwin") {
+    app.dock?.setIcon(resolveWindowIcon());
+  }
 }
