@@ -2,11 +2,14 @@ package docker
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/7samael7/Piper/engine/internal/actions"
+	"github.com/7samael7/Piper/engine/internal/expression"
 	"github.com/7samael7/Piper/engine/internal/logs"
 	"github.com/7samael7/Piper/engine/internal/pipeline/model"
+	"github.com/7samael7/Piper/engine/internal/scheduler"
 	"github.com/7samael7/Piper/engine/internal/secrets"
 	"github.com/7samael7/Piper/engine/internal/support"
 )
@@ -107,6 +110,51 @@ func TestSetupActionFeatureMatchesProvider(t *testing.T) {
 	}
 	if got := setupActionFeatureID(model.ProviderAzure); got != "azure.task-runtime" {
 		t.Fatalf("Azure feature = %s", got)
+	}
+}
+
+func TestBashCommandPreservesImageEnvironment(t *testing.T) {
+	got := bashCommand("go version")
+	want := []string{"/bin/bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", "go version"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bash command = %#v, want %#v", got, want)
+	}
+}
+
+func TestWorkflowRunContextDefaultsToSuccessfulCurrentRevision(t *testing.T) {
+	event := githubEventContext(model.RunRequest{EventName: "workflow_run"}, "master", "abc123")
+	workflowRun, ok := event["workflow_run"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("workflow_run context = %#v", event["workflow_run"])
+	}
+	if workflowRun["conclusion"] != "success" || workflowRun["head_sha"] != "abc123" || workflowRun["head_branch"] != "master" {
+		t.Fatalf("unexpected workflow_run context: %#v", workflowRun)
+	}
+}
+
+func TestSkippedDependencyMakesSuccessConditionFalse(t *testing.T) {
+	runtime := newRuntimeContext(
+		model.RunRequest{Provider: model.ProviderGitHub},
+		model.JobInstance{Job: model.Job{}},
+		map[string]scheduler.Result{"prepare": {Status: model.RunSkipped}},
+	)
+	result := expression.Evaluate(defaultJobCondition(model.ProviderGitHub, runtime.dependencies), runtime.expressionContext(runtime.status))
+	if result.Error != nil || result.Value {
+		t.Fatalf("unexpected condition result: %#v", result)
+	}
+}
+
+func TestMissingGitHubSecretResolvesToEmptyJobEnvironment(t *testing.T) {
+	runtime := newRuntimeContext(
+		model.RunRequest{Provider: model.ProviderGitHub},
+		model.JobInstance{Job: model.Job{Env: map[string]string{
+			"APPLE_CERTIFICATE": "${{ secrets.APPLE_CERTIFICATE }}",
+		}}},
+		nil,
+	)
+	env := runtime.base["env"].(map[string]interface{})
+	if env["APPLE_CERTIFICATE"] != "" {
+		t.Fatalf("APPLE_CERTIFICATE = %#v", env["APPLE_CERTIFICATE"])
 	}
 }
 

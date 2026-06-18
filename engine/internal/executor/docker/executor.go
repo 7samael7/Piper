@@ -413,7 +413,7 @@ func (e *Executor) executeShellStep(ctx context.Context, cli *client.Client, con
 	if envErr != nil {
 		return nil, envErr
 	}
-	shell := []string{"/bin/bash", "-lc", command}
+	shell := bashCommand(command)
 	if step.Shell == "pwsh" || step.Shell == "powershell" {
 		shell = []string{"pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command}
 	}
@@ -504,6 +504,10 @@ func selectedInstances(executionPlan *model.ExecutionPlan, jobID string) ([]mode
 	return executionPlan.Jobs, nil
 }
 
+func bashCommand(command string) []string {
+	return []string{"/bin/bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", command}
+}
+
 func buildEnv(request model.RunRequest, job model.Job, step model.Step) []string {
 	values := map[string]string{
 		"CI":             "true",
@@ -523,9 +527,14 @@ func buildEnv(request model.RunRequest, job model.Job, step model.Step) []string
 		values["BUILD_SOURCESDIRECTORY"] = "/workspace"
 		values["BUILD_REASON"] = request.EventName
 	default:
+		branch, sha, tag := gitMetadata(request.RepoPath)
 		values["GITHUB_ACTIONS"] = "false"
 		values["GITHUB_WORKSPACE"] = "/workspace"
 		values["GITHUB_EVENT_NAME"] = request.EventName
+		values["GITHUB_REF"] = gitRef(branch, tag)
+		values["GITHUB_REF_NAME"] = firstNonEmpty(tag, branch)
+		values["GITHUB_REPOSITORY"] = gitRepository(request.RepoPath)
+		values["GITHUB_SHA"] = sha
 	}
 	for key, value := range request.Inputs {
 		values["INPUT_"+envKey(key)] = value
@@ -554,9 +563,14 @@ func buildEnv(request model.RunRequest, job model.Job, step model.Step) []string
 
 func buildEnvWithContext(request model.RunRequest, job model.Job, step model.Step, runtime *runtimeContext, outputFile string) ([]string, error) {
 	values := map[string]string{}
-	for _, entry := range buildEnv(request, job, model.Step{}) {
+	for _, entry := range buildEnv(request, model.Job{}, model.Step{}) {
 		key, value, _ := strings.Cut(entry, "=")
 		values[key] = value
+	}
+	if runtimeEnv, ok := runtime.base["env"].(map[string]interface{}); ok {
+		for key, value := range runtimeEnv {
+			values[key] = fmt.Sprint(value)
+		}
 	}
 	for key, value := range step.Env {
 		interpolated, err := expression.Interpolate(request.Provider, value, runtime.expressionContext(runtime.status))
@@ -604,6 +618,10 @@ func newRuntimeContext(request model.RunRequest, instance model.JobInstance, dep
 		}
 		if dependency.Status == model.RunFailed {
 			status = model.RunFailed
+			continue
+		}
+		if dependency.Status == model.RunSkipped && status == model.RunSucceeded {
+			status = model.RunSkipped
 		}
 	}
 	env := map[string]interface{}{}
@@ -642,20 +660,38 @@ func newRuntimeContext(request model.RunRequest, instance model.JobInstance, dep
 	for key, value := range request.Inputs {
 		inputs[key] = value
 	}
+	secretsContext := map[string]interface{}{}
+	for key, value := range request.Secrets {
+		secretsContext[key] = value
+	}
+	event := githubEventContext(request, branch, sha)
+	repository := gitRepository(request.RepoPath)
+	token := firstNonEmpty(request.Secrets["GITHUB_TOKEN"], request.Secrets["GH_TOKEN"])
+	githubContext := map[string]interface{}{
+		"event_name": request.EventName,
+		"event":      event,
+		"ref":        gitRef(branch, tag),
+		"ref_name":   firstNonEmpty(tag, branch),
+		"repository": repository,
+		"sha":        sha,
+		"token":      token,
+		"workspace":  "/workspace",
+	}
 	base := map[string]interface{}{
-		"env":    env,
-		"inputs": inputs,
-		"matrix": instance.Matrix,
-		"github": map[string]interface{}{
-			"event_name": request.EventName,
-			"ref":        gitRef(branch, tag),
-			"ref_name":   firstNonEmpty(tag, branch),
-			"sha":        sha,
-			"workspace":  "/workspace",
-		},
+		"env":       env,
+		"inputs":    inputs,
+		"matrix":    instance.Matrix,
+		"github":    githubContext,
+		"secrets":   secretsContext,
 		"runner":    map[string]interface{}{"os": "Linux", "name": "Piper"},
 		"variables": env,
 		"changed":   changedFiles(request.RepoPath, request.BaseRef),
+	}
+	for key, value := range instance.Job.Env {
+		interpolated, err := expression.Interpolate(request.Provider, value, expression.Context{Values: base, Status: status})
+		if err == nil {
+			env[key] = interpolated
+		}
 	}
 	return &runtimeContext{
 		request: request, instance: instance, dependencies: dependencies,
@@ -694,6 +730,8 @@ func (r *runtimeContext) expressionContext(status model.RunStatus) expression.Co
 				status = model.RunFailed
 			} else if dependency.Status == model.RunCancelled && status != model.RunFailed {
 				status = model.RunCancelled
+			} else if dependency.Status == model.RunSkipped && status == model.RunSucceeded {
+				status = model.RunSkipped
 			}
 			for key, value := range dependency.Outputs {
 				if _, exists := outputs[key]; !exists {
@@ -707,6 +745,45 @@ func (r *runtimeContext) expressionContext(status model.RunStatus) expression.Co
 	values["needs"] = needs
 	values["job"] = map[string]interface{}{"status": status}
 	return expression.Context{Values: values, Status: status}
+}
+
+func githubEventContext(request model.RunRequest, branch, sha string) map[string]interface{} {
+	event := map[string]interface{}{}
+	for key, value := range request.EventData {
+		event[key] = value
+	}
+	if request.EventName == "workflow_run" {
+		workflowRun, _ := event["workflow_run"].(map[string]interface{})
+		if workflowRun == nil {
+			workflowRun = map[string]interface{}{}
+			event["workflow_run"] = workflowRun
+		}
+		if _, ok := workflowRun["conclusion"]; !ok {
+			workflowRun["conclusion"] = "success"
+		}
+		if _, ok := workflowRun["head_sha"]; !ok {
+			workflowRun["head_sha"] = sha
+		}
+		if _, ok := workflowRun["head_branch"]; !ok {
+			workflowRun["head_branch"] = branch
+		}
+	}
+	return event
+}
+
+func gitRepository(repoPath string) string {
+	remote := runGit(repoPath, "remote", "get-url", "origin")
+	remote = strings.TrimSuffix(remote, ".git")
+	switch {
+	case strings.HasPrefix(remote, "git@github.com:"):
+		return strings.TrimPrefix(remote, "git@github.com:")
+	case strings.HasPrefix(remote, "ssh://git@github.com/"):
+		return strings.TrimPrefix(remote, "ssh://git@github.com/")
+	case strings.HasPrefix(remote, "https://github.com/"):
+		return strings.TrimPrefix(remote, "https://github.com/")
+	default:
+		return ""
+	}
 }
 
 func defaultJobCondition(provider model.ProviderID, dependencies map[string]scheduler.Result) model.ConditionSpec {
@@ -766,7 +843,7 @@ func evaluateJobOutputs(definitions map[string]string, runtime *runtimeContext) 
 
 func readStepOutputs(ctx context.Context, cli *client.Client, containerID, outputFile string) (map[string]string, error) {
 	response, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Cmd:          []string{"/bin/bash", "-lc", "if [ -f " + outputFile + " ]; then cat " + outputFile + "; fi"},
+		Cmd:          bashCommand("if [ -f " + outputFile + " ]; then cat " + outputFile + "; fi"),
 		AttachStdout: true, AttachStderr: true,
 	})
 	if err != nil {

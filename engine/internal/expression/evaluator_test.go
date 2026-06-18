@@ -69,3 +69,39 @@ func TestGitLabRegexComparison(t *testing.T) {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 }
+
+func TestGitHubConditionShortCircuitsUnusedEventBranch(t *testing.T) {
+	result := Evaluate(model.ConditionSpec{
+		Provider: model.ProviderGitHub,
+		Original: "${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}",
+	}, Context{Values: map[string]interface{}{
+		"github": map[string]interface{}{"event_name": "workflow_dispatch"},
+	}})
+	if result.Error != nil || !result.Value {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestGitHubMissingNestedContextIsEmpty(t *testing.T) {
+	result := Evaluate(model.ConditionSpec{
+		Provider: model.ProviderGitHub,
+		Original: "${{ needs.prepare.outputs.should_release == 'true' }}",
+	}, Context{Values: map[string]interface{}{
+		"needs": map[string]interface{}{
+			"prepare": map[string]interface{}{"outputs": map[string]interface{}{}},
+		},
+	}})
+	if result.Error != nil || result.Value {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestUnknownTopLevelContextStillFails(t *testing.T) {
+	result := Evaluate(model.ConditionSpec{
+		Provider: model.ProviderGitHub,
+		Original: "${{ typo.value == 'true' }}",
+	}, Context{Values: map[string]interface{}{"github": map[string]interface{}{}}})
+	if result.Error == nil {
+		t.Fatalf("expected unknown top-level context error: %#v", result)
+	}
+}

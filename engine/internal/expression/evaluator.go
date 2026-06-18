@@ -43,7 +43,9 @@ type parser struct {
 	tokens       []token
 	index        int
 	ctx          Context
+	provider     model.ProviderID
 	allowUnknown bool
+	skip         bool
 }
 
 func Evaluate(spec model.ConditionSpec, ctx Context) model.ConditionResult {
@@ -60,7 +62,7 @@ func Evaluate(spec model.ConditionSpec, ctx Context) model.ConditionResult {
 		result.Reason = err.Message
 		return result
 	}
-	p := &parser{tokens: tokens, ctx: ctx}
+	p := &parser{tokens: tokens, ctx: ctx, provider: spec.Provider}
 	value, evalErr := p.parseExpression()
 	if evalErr == nil && p.peek().kind != tokenEOF {
 		evalErr = evaluationError("expression.trailing_tokens", "unexpected token "+p.peek().text, p.peek().pos)
@@ -125,7 +127,7 @@ func Validate(spec model.ConditionSpec) *model.EvaluationError {
 	if err != nil {
 		return err
 	}
-	p := &parser{tokens: tokens, ctx: Context{Values: map[string]interface{}{}}, allowUnknown: true}
+	p := &parser{tokens: tokens, ctx: Context{Values: map[string]interface{}{}}, provider: spec.Provider, allowUnknown: true}
 	_, parseErr := p.parseExpression()
 	if parseErr != nil {
 		return parseErr
@@ -141,7 +143,7 @@ func evaluateValue(provider model.ProviderID, source string, ctx Context) (inter
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{tokens: tokens, ctx: ctx}
+	p := &parser{tokens: tokens, ctx: ctx, provider: provider}
 	value, evalErr := p.parseExpression()
 	if evalErr != nil {
 		return nil, evalErr
@@ -255,12 +257,14 @@ func (p *parser) parseExpression() (interface{}, *model.EvaluationError) {
 func (p *parser) parseOr() (interface{}, *model.EvaluationError) {
 	left, err := p.parseAnd()
 	for err == nil && p.match(tokenOr) {
+		if !p.skip && truthy(left) {
+			err = p.parseSkipped(p.parseAnd)
+			continue
+		}
 		var right interface{}
 		right, err = p.parseAnd()
-		if err == nil {
-			if !truthy(left) {
-				left = right
-			}
+		if err == nil && !truthy(left) {
+			left = right
 		}
 	}
 	return left, err
@@ -269,17 +273,26 @@ func (p *parser) parseOr() (interface{}, *model.EvaluationError) {
 func (p *parser) parseAnd() (interface{}, *model.EvaluationError) {
 	left, err := p.parseEquality()
 	for err == nil && p.match(tokenAnd) {
+		if !p.skip && !truthy(left) {
+			err = p.parseSkipped(p.parseEquality)
+			left = false
+			continue
+		}
 		var right interface{}
 		right, err = p.parseEquality()
-		if err == nil {
-			if truthy(left) {
-				left = right
-			} else {
-				left = false
-			}
+		if err == nil && truthy(left) {
+			left = right
 		}
 	}
 	return left, err
+}
+
+func (p *parser) parseSkipped(parse func() (interface{}, *model.EvaluationError)) *model.EvaluationError {
+	previous := p.skip
+	p.skip = true
+	_, err := parse()
+	p.skip = previous
+	return err
 }
 
 func (p *parser) parseEquality() (interface{}, *model.EvaluationError) {
@@ -325,6 +338,9 @@ func (p *parser) parsePrimary() (interface{}, *model.EvaluationError) {
 		if p.match(tokenLParen) {
 			return p.parseCall(current)
 		}
+		if p.skip {
+			return false, nil
+		}
 		switch strings.ToLower(current.text) {
 		case "true":
 			return true, nil
@@ -335,6 +351,9 @@ func (p *parser) parsePrimary() (interface{}, *model.EvaluationError) {
 			if !ok {
 				if p.allowUnknown {
 					return current.text, nil
+				}
+				if p.provider == model.ProviderGitHub && contextRootExists(p.ctx.Values, current.text) {
+					return "", nil
 				}
 				return nil, evaluationError("expression.unknown_context", "unknown context value "+current.text, current.pos)
 			}
@@ -370,6 +389,9 @@ func (p *parser) parseCall(name token) (interface{}, *model.EvaluationError) {
 				return nil, evaluationError("expression.expected_comma", "expected comma", p.peek().pos)
 			}
 		}
+	}
+	if p.skip {
+		return false, nil
 	}
 	return p.call(name, args)
 }
@@ -425,12 +447,18 @@ func (p *parser) call(name token, args []interface{}) (interface{}, *model.Evalu
 		case map[string]interface{}:
 			value, ok := values[key]
 			if !ok {
+				if p.provider == model.ProviderGitHub {
+					return "", nil
+				}
 				return nil, evaluationError("expression.unknown_context", "unknown context value "+key, name.pos)
 			}
 			return value, nil
 		case map[string]string:
 			value, ok := values[key]
 			if !ok {
+				if p.provider == model.ProviderGitHub {
+					return "", nil
+				}
 				return nil, evaluationError("expression.unknown_context", "unknown context value "+key, name.pos)
 			}
 			return value, nil
@@ -517,6 +545,12 @@ func resolve(values map[string]interface{}, path string) (interface{}, bool) {
 		}
 	}
 	return current, true
+}
+
+func contextRootExists(values map[string]interface{}, path string) bool {
+	root, _, _ := strings.Cut(path, ".")
+	_, ok := values[root]
+	return ok
 }
 
 func truthy(value interface{}) bool {

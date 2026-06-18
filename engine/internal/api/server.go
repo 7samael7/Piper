@@ -461,6 +461,7 @@ func allRemoteActionsTrusted(workflow *model.Workflow, trusted []map[string]stri
 func isBuiltinActionReference(reference string) bool {
 	return strings.HasPrefix(reference, "actions/checkout@") ||
 		strings.HasPrefix(reference, "actions/setup-node@") ||
+		strings.HasPrefix(reference, "actions/setup-go@") ||
 		strings.HasPrefix(reference, "actions/setup-dotnet@") ||
 		strings.HasPrefix(reference, "actions/upload-artifact@") ||
 		strings.HasPrefix(reference, "actions/download-artifact@") ||

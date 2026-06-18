@@ -135,7 +135,7 @@ Support classifications come from the machine-readable registry used by validati
 - Piper pulls a Docker image and creates one container per job.
 - Every step in a job runs in the same container.
 - Jobs run through a dependency-aware scheduler with configurable concurrency.
-- Shell commands run through `/bin/bash -lc` by default; steps that declare `pwsh` or `powershell` run through `pwsh` instead.
+- Shell commands run through a non-login `/bin/bash` by default so the selected image's environment is preserved; steps that declare `pwsh` or `powershell` run through `pwsh` instead.
 - The repository is bind-mounted at `/workspace`.
 - A failed shell step stops that job; unrelated jobs still run, and the run's final status is failed.
 - Common GitHub, GitLab, and Azure job/step conditions are evaluated and false conditions produce explicit skip reasons.

@@ -199,6 +199,7 @@ export interface RunConfig {
   provider: ProviderID;
   jobId?: string;
   eventName: string;
+  eventData?: Record<string, unknown>;
   inputs: Record<string, string>;
   env: Record<string, string>;
   secrets: Record<string, string>;

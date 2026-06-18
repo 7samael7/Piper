@@ -155,6 +155,7 @@ Parameters:
 | `provider` | string | No | Defaults to `github`. |
 | `jobId` | string | No | Run exactly one job when supplied. |
 | `eventName` | string | No | Uses a provider default when empty. |
+| `eventData` | object | No | Optional provider event payload. Local `workflow_run` events default to a successful run at the current revision. |
 | `inputs` | object | No | Converted to `INPUT_*` environment variables. |
 | `env` | object | No | User environment variables. |
 | `secrets` | object | No | Environment variables also used for log masking. |

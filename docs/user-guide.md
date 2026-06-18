@@ -297,10 +297,10 @@ Piper supports one setup runtime image per job. If setup actions require conflic
 Every `run`, GitLab script block, Azure `bash`, or Azure `script` step runs as:
 
 ```text
-/bin/bash -lc <script>
+/bin/bash --noprofile --norc -eo pipefail -c <script>
 ```
 
-The configured image must include `/bin/bash`. If it does not, use a Bash-capable image for local execution.
+The non-login shell preserves environment variables such as `PATH` supplied by the selected image. The configured image must include `/bin/bash`; if it does not, use a Bash-capable image for local execution.
 
 The repository is mounted at `/workspace`. Relative working directories are resolved below that path. GitHub `defaults.run.working-directory` and parsed step working directories are honored. Steps that declare `pwsh` or `powershell` run through `pwsh -NoLogo -NoProfile -NonInteractive -Command` and require `pwsh` in the image; other declared shell values do not change the Bash executor.
 

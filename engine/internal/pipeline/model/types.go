@@ -262,6 +262,7 @@ type RunRequest struct {
 	Provider           ProviderID                                  `json:"provider"`
 	JobID              string                                      `json:"jobId,omitempty"`
 	EventName          string                                      `json:"eventName"`
+	EventData          map[string]interface{}                      `json:"eventData,omitempty"`
 	Inputs             map[string]string                           `json:"inputs"`
 	Env                map[string]string                           `json:"env"`
 	Secrets            map[string]string                           `json:"secrets"`
