@@ -7,25 +7,21 @@ import { pipeline } from "node:stream/promises";
 import type { UpdateCheckResult } from "../shared/updates";
 
 interface UpdateConfig {
-  provider: "gitlab";
+  provider: "github";
   apiUrl: string;
   releasePageUrl?: string;
 }
 
-interface GitLabReleaseLink {
+interface GitHubReleaseAsset {
   name: string;
   url: string;
-  direct_asset_url?: string;
+  browser_download_url: string;
 }
 
-interface GitLabRelease {
+interface GitHubRelease {
   tag_name: string;
-  _links?: {
-    self?: string;
-  };
-  assets?: {
-    links?: GitLabReleaseLink[];
-  };
+  html_url?: string;
+  assets?: GitHubReleaseAsset[];
 }
 
 export class UpdateService {
@@ -51,27 +47,22 @@ export class UpdateService {
 
     try {
       const apiUrl = safeExternalUrl(config.apiUrl);
-      const headers: Record<string, string> = { Accept: "application/json" };
-      if (process.env.PIPER_UPDATE_TOKEN) {
-        headers["PRIVATE-TOKEN"] = process.env.PIPER_UPDATE_TOKEN;
-      }
-
-      const response = await net.fetch(apiUrl, { headers });
+      const response = await net.fetch(apiUrl, { headers: githubRequestHeaders() });
       if (response.status === 404) {
         return this.remember({
           status: "up-to-date",
           currentVersion,
-          message: "No published release is newer than this build.",
+          message: "No published GitHub release is available to this build.",
         });
       }
       if (!response.ok) {
-        throw new Error(`GitLab returned HTTP ${response.status}.`);
+        throw new Error(`GitHub returned HTTP ${response.status}.`);
       }
 
-      const release = (await response.json()) as GitLabRelease;
+      const release = (await response.json()) as GitHubRelease;
       const latestVersion = normalizeVersion(release.tag_name);
       const comparison = compareVersions(latestVersion, currentVersion);
-      const releaseUrl = optionalSafeExternalUrl(config.releasePageUrl ?? release._links?.self);
+      const releaseUrl = optionalSafeExternalUrl(release.html_url ?? config.releasePageUrl);
       if (comparison <= 0) {
         return this.remember({
           status: "up-to-date",
@@ -82,7 +73,7 @@ export class UpdateService {
         });
       }
 
-      const selectedAsset = selectDmgAsset(release.assets?.links ?? []);
+      const selectedAsset = selectDmgAsset(release.assets ?? []);
       return this.remember({
         status: "available",
         currentVersion,
@@ -174,25 +165,29 @@ function loadUpdateConfig(): UpdateConfig | undefined {
     ? path.join(process.resourcesPath, "update-config.json")
     : path.join(app.getAppPath(), "update-config.json");
   try {
-    return JSON.parse(fs.readFileSync(configPath, "utf8")) as UpdateConfig;
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as Partial<UpdateConfig>;
+    if (config.provider !== "github" || typeof config.apiUrl !== "string") {
+      return undefined;
+    }
+    return config as UpdateConfig;
   } catch {
     return undefined;
   }
 }
 
-function selectDmgAsset(links: GitLabReleaseLink[]): { downloadUrl: string; checksumUrl?: string } | undefined {
-  const dmgLinks = links.filter((link) => link.name.toLowerCase().endsWith(".dmg"));
+function selectDmgAsset(assets: GitHubReleaseAsset[]): { downloadUrl: string; checksumUrl?: string } | undefined {
+  const dmgAssets = assets.filter((asset) => asset.name.toLowerCase().endsWith(".dmg"));
   const architectureNames = process.arch === "arm64" ? ["arm64", "aarch64"] : ["x64", "amd64", "x86_64"];
   const selected =
-    dmgLinks.find((link) => architectureNames.some((architecture) => link.name.toLowerCase().includes(architecture))) ??
-    (dmgLinks.length === 1 ? dmgLinks[0] : undefined);
+    dmgAssets.find((asset) => architectureNames.some((architecture) => asset.name.toLowerCase().includes(architecture))) ??
+    (dmgAssets.length === 1 ? dmgAssets[0] : undefined);
   if (!selected) {
     return undefined;
   }
-  const checksum = links.find((link) => link.name === `${selected.name}.sha256`);
+  const checksum = assets.find((asset) => asset.name === `${selected.name}.sha256`);
   return {
-    downloadUrl: safeExternalUrl(selected.direct_asset_url ?? selected.url),
-    checksumUrl: optionalSafeExternalUrl(checksum?.direct_asset_url ?? checksum?.url),
+    downloadUrl: safeExternalUrl(selected.url || selected.browser_download_url),
+    checksumUrl: optionalSafeExternalUrl(checksum?.url ?? checksum?.browser_download_url),
   };
 }
 
@@ -229,9 +224,16 @@ function safeExternalUrl(value: string): string {
 }
 
 function updateRequestHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
+  return githubRequestHeaders("application/octet-stream");
+}
+
+function githubRequestHeaders(accept = "application/vnd.github+json"): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: accept,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
   if (process.env.PIPER_UPDATE_TOKEN) {
-    headers["PRIVATE-TOKEN"] = process.env.PIPER_UPDATE_TOKEN;
+    headers.Authorization = `Bearer ${process.env.PIPER_UPDATE_TOKEN}`;
   }
   return headers;
 }

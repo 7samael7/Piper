@@ -34,13 +34,27 @@ examples/azure-pipelines
 
 Docker Desktop, OrbStack, Colima, or another Docker-compatible daemon must be running to execute jobs locally. The engine checks `DOCKER_HOST`, the active Docker CLI context, and common local socket paths. Discovery, validation, graph visualization, and history work without Docker.
 
-## GitLab releases
+## GitHub releases
 
-The root `.gitlab-ci.yml` runs Go and desktop checks on branches and merge requests. Tags such as `v0.2.0` additionally require a macOS runner tagged `macos`; that job builds a versioned DMG, uploads it to the GitLab Generic Package Registry, and creates a GitLab Release with installer and SHA-256 links.
+The root GitHub Actions workflows run Go and desktop checks on branches and pull requests. The `Release` workflow builds Intel and Apple Silicon DMGs, generates SHA-256 checksum files, and publishes them to a GitHub Release.
 
-Packaged GitLab builds contain the project release endpoint and check it for newer semantic versions. The app offers the architecture-matching DMG when one is available. Public GitLab projects work without credentials. Private projects can provide `PIPER_UPDATE_TOKEN` when launching the app.
+Create a release by pushing a semantic-version tag:
 
-For trusted distribution, install a Developer ID Application certificate on the macOS runner and set `APPLE_SIGN_IDENTITY`. Notarization is enabled when `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` are also present.
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Alternatively, open **Actions → Release → Run workflow** and enter a version such as `0.2.0`. The workflow sets the packaged application version automatically; the version does not need to be edited in the repository first.
+
+Packaged builds check the repository's latest GitHub Release and offer the architecture-matching DMG. Public repositories work without credentials. Private repositories can provide a fine-grained token with Contents read access through `PIPER_UPDATE_TOKEN` when launching the app.
+
+Unsigned DMGs are produced when no Apple credentials are configured. For trusted distribution, configure these GitHub Actions secrets:
+
+- `APPLE_CERTIFICATE`: Base64-encoded Developer ID Application `.p12` certificate.
+- `APPLE_CERTIFICATE_PASSWORD`: Password for the `.p12` certificate.
+- `APPLE_SIGN_IDENTITY`: Certificate identity, such as `Developer ID Application: Example, Inc. (TEAMID)`.
+- `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`: Optional notarization credentials; configure all three together.
 
 ## Current Provider Support
 

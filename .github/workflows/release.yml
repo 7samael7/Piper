@@ -1,0 +1,214 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version to release, for example 0.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - name: Resolve version
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="${INPUT_VERSION#v}"
+          else
+            VERSION="${REF_NAME#v}"
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version must use semantic versioning, for example 0.2.0 or 0.2.0-beta.1." >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build DMG (${{ matrix.arch }})
+    needs: prepare
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set release version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node scripts/set-version.mjs "$VERSION"
+          npm install --package-lock-only --ignore-scripts
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks
+        run: |
+          (cd engine && go test ./...)
+          npm --workspace packages/shared-types run build
+          npm --workspace apps/desktop run typecheck
+
+      - name: Validate Apple signing configuration
+        run: |
+          if [[ -n "$APPLE_CERTIFICATE" ]]; then
+            test -n "$APPLE_CERTIFICATE_PASSWORD"
+            test -n "$APPLE_SIGN_IDENTITY"
+          elif [[ -n "$APPLE_CERTIFICATE_PASSWORD" || -n "$APPLE_SIGN_IDENTITY" ]]; then
+            echo "APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and APPLE_SIGN_IDENTITY must be configured together." >&2
+            exit 1
+          fi
+
+          if [[ -n "$APPLE_ID" || -n "$APPLE_APP_SPECIFIC_PASSWORD" || -n "$APPLE_TEAM_ID" ]]; then
+            test -n "$APPLE_CERTIFICATE"
+            test -n "$APPLE_ID"
+            test -n "$APPLE_APP_SPECIFIC_PASSWORD"
+            test -n "$APPLE_TEAM_ID"
+          fi
+
+      - name: Install Apple signing certificate
+        if: ${{ env.APPLE_CERTIFICATE != '' }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/build_certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      - name: Configure update endpoint
+        env:
+          PIPER_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: node scripts/write-update-config.mjs
+
+      - name: Build engine
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          if [[ "$ARCH" == "arm64" ]]; then
+            GO_ARCH="arm64"
+          else
+            GO_ARCH="amd64"
+          fi
+          (
+            cd engine
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$GO_ARCH" go build -trimpath -ldflags="-s -w" -o bin/piper-engine ./cmd/daemon
+          )
+
+      - name: Build DMG
+        env:
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          npm --workspace apps/desktop run make -- --platform=darwin --arch="$ARCH"
+
+          mkdir -p release
+          DMG_SOURCE="$(find apps/desktop/out/make -type f -name '*.dmg' -print -quit)"
+          test -n "$DMG_SOURCE"
+          DMG_NAME="Piper-${VERSION}-${ARCH}.dmg"
+          cp "$DMG_SOURCE" "release/$DMG_NAME"
+          (
+            cd release
+            shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256"
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: piper-dmg-${{ matrix.arch }}
+          path: release/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: piper-dmg-*
+          path: release
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"
+            exit 0
+          fi
+
+          ARGS=(
+            "$TAG"
+            release/*
+            --repo "$GITHUB_REPOSITORY"
+            --title "Piper $TAG"
+            --generate-notes
+          )
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            ARGS+=(--target "$GITHUB_SHA")
+          else
+            ARGS+=(--verify-tag)
+          fi
+          if [[ "$PRERELEASE" == "true" ]]; then
+            ARGS+=(--prerelease)
+          fi
+
+          gh release create "${ARGS[@]}"

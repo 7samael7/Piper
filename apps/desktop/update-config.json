@@ -1,5 +1,5 @@
 {
-  "provider": "gitlab",
-  "apiUrl": "",
-  "releasePageUrl": ""
+  "provider": "github",
+  "apiUrl": "https://api.github.com/repos/7samael7/Piper/releases/latest",
+  "releasePageUrl": "https://github.com/7samael7/Piper/releases/latest"
 }

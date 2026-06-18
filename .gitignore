@@ -4,7 +4,6 @@ node_modules/
 apps/desktop/.vite/
 apps/desktop/out/
 dist/
-release.env
 
 # TypeScript package output
 packages/shared-types/dist/
