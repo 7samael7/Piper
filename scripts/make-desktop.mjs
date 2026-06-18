@@ -62,8 +62,13 @@ run(
 );
 
 function run(command, args, options) {
+  // Node >=18.20.2/20.12.2/21.7.3 refuses to spawn .cmd/.bat files (e.g. npm.cmd)
+  // without shell:true and throws EINVAL. Enable the shell only for those so that
+  // commands with spaces in their args (e.g. go's -ldflags) are left untouched.
+  const useShell = options?.shell ?? (process.platform === "win32" && /\.(cmd|bat)$/i.test(command));
   const result = spawnSync(command, args, {
     ...options,
+    shell: useShell,
     stdio: "inherit",
   });
   if (result.error) {
