@@ -48,7 +48,7 @@ Request:
 {"jsonrpc":"2.0","id":1,"method":"provider.list","params":{}}
 ```
 
-The result contains every registered provider (`github`, `gitlab`, and `azure`). All three currently expose the same capability set; only the GitHub entry is shown in full below.
+The result contains every registered provider (`github`, `gitlab`, and `azure`). Capabilities are generated from the support registry, so each provider has a different feature list. Every capability includes a stable feature ID, one of the six support states, and its runtime disposition.
 
 ```json
 [
@@ -57,16 +57,24 @@ The result contains every registered provider (`github`, `gitlab`, and `azure`).
     "name": "GitHub Actions",
     "description": "Discover, validate, visualize, and locally execute GitHub Actions workflows.",
     "capabilities": [
-      {"name": "discover", "support": "supported"},
-      {"name": "validate", "support": "supported"},
-      {"name": "graph", "support": "supported"},
-      {"name": "run shell steps", "support": "partial"}
+      {
+        "featureId": "common.workflow.discovery",
+        "name": "Workflow discovery and YAML parsing",
+        "support": "supported-local",
+        "runtimeDisposition": "execute"
+      },
+      {
+        "featureId": "github.runner",
+        "name": "runs-on labels",
+        "support": "validation-only",
+        "runtimeDisposition": "inspect-only"
+      }
     ]
-  },
-  {"id": "gitlab", "name": "GitLab CI/CD", "description": "Discover, validate, visualize, and locally execute GitLab CI/CD pipelines.", "capabilities": []},
-  {"id": "azure", "name": "Azure Pipelines", "description": "Discover, validate, visualize, and locally execute Azure Pipelines YAML.", "capabilities": []}
+  }
 ]
 ```
+
+The example is abbreviated. Use the generated [Provider Support Reference](provider-support.md) for the complete contract.
 
 ### `workflow.discover`
 
@@ -110,10 +118,12 @@ Parameters:
 The result contains the workflow summary plus:
 
 - `rawYaml`
+- Optional `resolvedYaml`
 - `jobs`
 - `graph`
 - `validation`
-- Optional `unsupportedFeatures`
+- `featureRefs`
+- Optional `executionPlan`
 
 ### `workflow.validate`
 
@@ -129,6 +139,8 @@ Uses the same parameters as `workflow.get` and returns only the validation repor
 ```
 
 `valid=false` means `run.start` will reject the workflow.
+
+An `unsupported` support label does not necessarily make the structural validation report invalid. Unsupported executable features are retained for inspection and fail through a structured `support_error` before a selected job starts Docker.
 
 ### `run.start`
 
@@ -258,7 +270,7 @@ Event types, grouped by category:
 - Run lifecycle: `run_started`, `run_finished`, `run_failed`, `run_cancelled`.
 - Job lifecycle: `job_started`, `job_status`, `job_finished`, `job_skipped`, `job_failure_allowed`.
 - Step lifecycle: `step_started`, `step_log`, `step_finished`, `step_failed`, `step_skipped`, `step_unsupported`, `step_continued`.
-- Support lifecycle: `support_feature`, `support_error`, and `step_emulated`. Support payloads include `featureId`, provider, status, runtime disposition, source path/location, local behavior, hosted differences, security implications, and fallback.
+- Support lifecycle: `support_feature`, `support_error`, and `step_emulated`. Support payloads include `featureId`, feature/category, provider, status, runtime disposition, source path/location, local behavior, hosted differences, security implications, fallback, and the generated documentation anchor.
 - Conditions: `condition_evaluated`, `condition_evaluation_error`.
 - Support and compatibility: `support_notice`, `support_feature`, `security_warning`.
 - Actions and images: `action_resolved`, `image_pull`.

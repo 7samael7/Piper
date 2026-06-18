@@ -139,7 +139,7 @@ The local executor deliberately favors understandable behavior over broad emulat
 
 1. Load and validate the selected workflow.
 2. Persist a queued run.
-3. Emit compatibility notices for partial and unsupported features.
+3. Emit compatibility notices for every feature not classified `supported-local`.
 4. Connect to Docker using `DOCKER_HOST`, the active Docker context, the default endpoint, or known local socket paths.
 5. Compile logical jobs into matrix-expanded execution instances.
 6. Schedule dependency-ready jobs within the configured concurrency limit.

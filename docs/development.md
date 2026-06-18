@@ -172,13 +172,13 @@ A provider change normally requires:
 
 1. Map YAML into the neutral model.
 2. Build graph-compatible `Needs` IDs.
-3. Classify job and step support.
-4. Add feature-level validation messages.
-5. Add parser tests for supported, partial, and unsupported cases.
+3. Emit stable registry feature references with paths and source locations.
+4. Classify parser and runtime behavior in `internal/support/registry.json`.
+5. Add parser and runtime-contract tests for supported, partial, and unsupported cases.
 6. Register a new provider in `internal/api/server.go` if adding one.
 7. Extend `ProviderID` in Go and TypeScript.
 8. Add renderer labels and a default event.
-9. Update the provider support documentation.
+9. Regenerate the provider support documentation.
 
 Keep parser visibility separate from executor support. Piper should preserve useful metadata and explain unsupported behavior rather than silently pretending to execute it.
 
@@ -189,8 +189,8 @@ Keep parser visibility separate from executor support. Piper should preserve use
 - Output uses Docker's multiplexed stream and is separated with `stdcopy.StdCopy`.
 - Cancellation kills the active container with `SIGKILL`.
 - Containers are force-removed after the job.
-- The repository path is bind-mounted read-write.
-- Shell execution is fixed to `/bin/bash -lc`.
+- Writable and read-only modes bind-mount the prepared workspace; isolated mode executes from a temporary copy.
+- Bash is the default shell, while supported `pwsh`/PowerShell steps use `pwsh` when the selected image provides it.
 
 When adding support for a step type, update both validation classification and executor behavior. A mismatch can cause the UI to advertise behavior the runtime does not provide.
 
@@ -339,4 +339,4 @@ go run ./cmd/supportdoc -write
 go test ./internal/support
 ```
 
-Review and update `internal/support/testdata/contract.sha256` only when the status/runtime contract change is intentional.
+Review and update `internal/support/testdata/contract.sha256` only when the status/runtime contract change is intentional. Registry entries must point to real `_test.go` files, and CI rejects stale generated documentation or an unreviewed status/runtime change.
