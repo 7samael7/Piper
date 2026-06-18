@@ -27,6 +27,7 @@ import (
 	"github.com/7samael7/Piper/engine/internal/pipeline/plan"
 	"github.com/7samael7/Piper/engine/internal/scheduler"
 	"github.com/7samael7/Piper/engine/internal/secrets"
+	"github.com/7samael7/Piper/engine/internal/support"
 	"github.com/7samael7/Piper/engine/internal/workspace"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -60,6 +61,12 @@ func (e *Executor) Execute(ctx context.Context, request model.RunRequest, workfl
 	emit(systemEvent("", "", "support_notice", "", "Local Docker execution is an MVP and does not exactly match hosted CI runners."))
 	if request.MockOIDC {
 		emit(systemEvent("", "", "security_warning", model.RunRunning, "Mock OIDC is enabled. Piper exposes only a clearly marked local test token, never a provider-issued identity."))
+	}
+	if feature, ok, err := rejectingFeature(workflow.Features); err != nil {
+		return err
+	} else if ok {
+		emitSupportError(emit, "", "", feature)
+		return fmt.Errorf("%s: %s", feature.FeatureID, feature.Fallback)
 	}
 
 	cli, err := connectDocker(ctx)
@@ -158,6 +165,12 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 		emit(systemEvent(job.ID, "", "job_skipped", model.RunSkipped, conditionResult.Reason))
 		return scheduler.Result{Status: model.RunSkipped}
 	}
+	if feature, ok, err := rejectingFeature(job.Features); err != nil {
+		return scheduler.Result{Status: model.RunFailed, Error: err}
+	} else if ok {
+		emitSupportError(emit, job.ID, "", feature)
+		return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("%s: %s", feature.FeatureID, feature.Fallback)}
+	}
 	approvalTarget := job.Environment
 	if approvalTarget == "" && job.When == "manual" {
 		approvalTarget = "manual job " + job.Name
@@ -250,6 +263,12 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 			runtime.steps[stepID] = stepRuntime{Status: model.RunSkipped}
 			continue
 		}
+		if feature, ok, guardErr := rejectingFeature(step.Features); guardErr != nil {
+			return scheduler.Result{Status: model.RunFailed, Error: guardErr}
+		} else if ok {
+			emitSupportError(emit, job.ID, stepID, feature)
+			return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("%s: %s", feature.FeatureID, feature.Fallback)}
+		}
 		emit(systemEvent(job.ID, stepID, "step_started", model.RunRunning, fmt.Sprintf("Step %s started.", step.Name)))
 
 		switch {
@@ -275,9 +294,9 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 			runtime.steps[stepID] = stepRuntime{Status: model.RunSucceeded, Outputs: outputs}
 			emit(systemEvent(job.ID, stepID, "step_finished", model.RunSucceeded, fmt.Sprintf("Step %s finished.", step.Name)))
 		case strings.HasPrefix(step.Uses, "actions/checkout@"):
-			emit(systemEvent(job.ID, stepID, "step_skipped", model.RunSucceeded, "actions/checkout is a local no-op because the repository is mounted."))
+			emit(emulationEvent(job.ID, stepID, "github.checkout", "actions/checkout is emulated because the prepared repository is already mounted."))
 		case request.Provider == model.ProviderAzure && step.Uses == "checkout":
-			emit(systemEvent(job.ID, stepID, "step_skipped", model.RunSucceeded, "Azure checkout is a local no-op because the repository is mounted."))
+			emit(emulationEvent(job.ID, stepID, "azure.checkout", "Azure checkout is emulated because the prepared repository is already mounted."))
 		case request.Provider == model.ProviderGitHub && isSetupAction(step.Uses):
 			emit(systemEvent(job.ID, stepID, "step_finished", model.RunSucceeded, setupActionMessage(step, imageName)))
 		case e.isBuiltinAction(request.Provider, step.Uses):
@@ -305,7 +324,9 @@ func (e *Executor) executeJob(ctx context.Context, cli *client.Client, request m
 			emit(systemEvent(job.ID, stepID, "step_unsupported", model.RunFailed, message))
 			return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("%s", message)}
 		default:
-			emit(systemEvent(job.ID, stepID, "step_unsupported", model.RunRunning, "Step has no run or uses block and was skipped."))
+			message := "Step has no supported executable form."
+			emit(systemEvent(job.ID, stepID, "support_error", model.RunFailed, message))
+			return scheduler.Result{Status: model.RunFailed, Error: fmt.Errorf("%s", message)}
 		}
 	}
 
@@ -1332,6 +1353,48 @@ func systemEvent(jobID, stepID, eventType string, status model.RunStatus, messag
 	event.StepID = stepID
 	event.Status = status
 	return event
+}
+
+func rejectingFeature(refs []model.FeatureRef) (model.FeatureSupport, bool, error) {
+	registry, err := support.Default()
+	if err != nil {
+		return model.FeatureSupport{}, false, err
+	}
+	for _, ref := range refs {
+		feature, resolveErr := registry.Resolve(ref)
+		if resolveErr != nil {
+			return model.FeatureSupport{}, false, resolveErr
+		}
+		if feature.RuntimeDisposition == model.RuntimeReject {
+			return feature, true, nil
+		}
+	}
+	return model.FeatureSupport{}, false, nil
+}
+
+func emitSupportError(emit logs.Emitter, jobID, stepID string, feature model.FeatureSupport) {
+	event := systemEvent(jobID, stepID, "support_error", model.RunFailed, feature.Message)
+	event.Data = supportEventData(feature)
+	emit(event)
+}
+
+func emulationEvent(jobID, stepID, featureID, message string) logs.Event {
+	event := systemEvent(jobID, stepID, "step_emulated", model.RunSucceeded, message)
+	if registry, err := support.Default(); err == nil {
+		if feature, resolveErr := registry.Resolve(model.FeatureRef{ID: featureID}); resolveErr == nil {
+			event.Data = supportEventData(feature)
+		}
+	}
+	return event
+}
+
+func supportEventData(feature model.FeatureSupport) map[string]interface{} {
+	return map[string]interface{}{
+		"featureId": feature.FeatureID, "provider": feature.Provider, "status": feature.Support,
+		"runtimeDisposition": feature.RuntimeDisposition, "path": feature.Path, "origin": feature.Origin,
+		"localBehavior": feature.LocalBehavior, "hostedDifferences": feature.HostedDifferences,
+		"securityImplications": feature.SecurityImplications, "fallback": feature.Fallback,
+	}
 }
 
 type eventWriter struct {
