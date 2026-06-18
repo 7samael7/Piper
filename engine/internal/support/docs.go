@@ -53,6 +53,10 @@ func RenderProviderSupport(registry *Registry) []byte {
 	return bytes.TrimSuffix(output.Bytes(), []byte("\n"))
 }
 
+func ProviderSupportMatches(existing []byte, registry *Registry) bool {
+	return bytes.Equal(normalizeLineEndings(existing), RenderProviderSupport(registry))
+}
+
 func ContractDigest(registry *Registry) string {
 	var canonical bytes.Buffer
 	for _, entry := range registry.Features {
@@ -60,6 +64,10 @@ func ContractDigest(registry *Registry) string {
 	}
 	sum := sha256.Sum256(canonical.Bytes())
 	return hex.EncodeToString(sum[:])
+}
+
+func normalizeLineEndings(value []byte) []byte {
+	return bytes.ReplaceAll(value, []byte("\r\n"), []byte("\n"))
 }
 
 func titleCase(value string) string {

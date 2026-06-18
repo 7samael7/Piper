@@ -39,8 +39,16 @@ func TestGeneratedProviderSupportIsCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(current) != string(RenderProviderSupport(registry)) {
+	if !ProviderSupportMatches(current, registry) {
 		t.Fatal("docs/provider-support.md is stale; run `cd engine && go run ./cmd/supportdoc -write`")
+	}
+}
+
+func TestGeneratedProviderSupportAcceptsWindowsLineEndings(t *testing.T) {
+	registry := MustDefault()
+	windows := strings.ReplaceAll(string(RenderProviderSupport(registry)), "\n", "\r\n")
+	if !ProviderSupportMatches([]byte(windows), registry) {
+		t.Fatal("generated provider support must compare equally with CRLF line endings")
 	}
 }
 

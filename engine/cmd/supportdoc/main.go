@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -35,7 +34,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	if !bytes.Equal(existing, generated) {
+	if !support.ProviderSupportMatches(existing, registry) {
 		fatal(fmt.Errorf("%s is stale; run `cd engine && go run ./cmd/supportdoc -write`", *output))
 	}
 }
