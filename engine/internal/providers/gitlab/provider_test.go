@@ -57,9 +57,18 @@ deploy:
 	if workflow.Jobs[2].If == "" {
 		t.Fatal("expected deploy rules to be captured as condition text")
 	}
-	if len(workflow.Unsupported) == 0 {
-		t.Fatal("expected include to be reported as workflow unsupported feature")
+	if !hasFeature(workflow.Features, "gitlab.include-local") {
+		t.Fatal("expected local include feature reference")
 	}
+}
+
+func hasFeature(features []model.FeatureRef, id string) bool {
+	for _, feature := range features {
+		if feature.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseGitLabImplicitStageNeeds(t *testing.T) {
@@ -77,5 +86,25 @@ test:
 	}
 	if got := workflow.Jobs[1].Needs; len(got) != 1 || got[0] != "build" {
 		t.Fatalf("implicit needs = %v, want [build]", got)
+	}
+}
+
+func TestUnsupportedGitLabPoliciesAndRemoteIncludesAreExplicit(t *testing.T) {
+	workflow, err := parseWorkflow(".gitlab-ci.yml", []byte(`
+include:
+  - remote: https://example.invalid/ci.yml
+test:
+  script: echo test
+  retry: 2
+  timeout: 10m
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFeature(workflow.Features, "gitlab.include-remote") {
+		t.Fatal("remote include must be explicit")
+	}
+	if !hasFeature(workflow.Jobs[0].Features, "gitlab.unsupported-job-policy") {
+		t.Fatal("ignored job policies must be explicit")
 	}
 }

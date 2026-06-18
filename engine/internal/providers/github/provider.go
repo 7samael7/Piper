@@ -13,6 +13,7 @@ import (
 	"github.com/7samael7/Piper/engine/internal/pipeline/model"
 	"github.com/7samael7/Piper/engine/internal/pipeline/plan"
 	"github.com/7samael7/Piper/engine/internal/pipeline/validation"
+	"github.com/7samael7/Piper/engine/internal/support"
 	"github.com/7samael7/Piper/engine/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -106,12 +107,15 @@ func (p *Provider) Load(ctx context.Context, repoPath, workflowPath string) (*mo
 	workflow.Validation = p.Validate(ctx, workflow)
 	workflow.Valid = workflow.Validation.Valid
 	workflow.Support = workflow.Validation.Support
+	workflow.Graph = graph.Build(workflow)
 	if workflow.Valid {
-		if executionPlan, compileErr := plan.Compile(workflow, plan.DefaultMaxExpandedJobs, plan.DefaultConcurrency); compileErr == nil {
-			workflow.ExecutionPlan = executionPlan
-			workflow.Graph = graph.BuildExecutionPlan(executionPlan)
-			workflow.JobCount = len(executionPlan.Jobs)
+		executionPlan, compileErr := plan.Compile(workflow, plan.DefaultMaxExpandedJobs, plan.DefaultConcurrency)
+		if compileErr != nil {
+			return nil, content, compileErr
 		}
+		workflow.ExecutionPlan = executionPlan
+		workflow.Graph = graph.BuildExecutionPlan(executionPlan)
+		workflow.JobCount = len(executionPlan.Jobs)
 	}
 	return workflow, content, nil
 }
@@ -151,9 +155,11 @@ func parseWorkflow(path string, content []byte) (*model.Workflow, error) {
 			Valid:    true,
 			Support:  model.SupportSupported,
 		},
-		RawYAML: string(content),
-		Jobs:    jobs,
+		RawYAML:  string(content),
+		Jobs:     jobs,
+		Features: githubWorkflowFeatures(root),
 	}
+	model.ApplySourceFile(workflow, path)
 	return workflow, nil
 }
 
@@ -240,6 +246,23 @@ func parseJobs(node *yaml.Node, workflowEnv map[string]string) ([]model.Job, err
 			Steps:       steps,
 			Support:     model.SupportSupported,
 			Origin:      &model.SourceOrigin{Line: node.Content[i].Line, Column: node.Content[i].Column},
+			Features:    []model.FeatureRef{support.Ref("github.metadata", "jobs."+id, origin(node.Content[i]))},
+		}
+		job.Features = append(job.Features, support.Ref("github.runner", "jobs."+id+".runs-on", origin(mappingValue(body, "runs-on"))))
+		if mappingValue(body, "env") != nil || len(workflowEnv) > 0 {
+			job.Features = append(job.Features, support.Ref("github.env", "jobs."+id+".env", origin(mappingValue(body, "env"))))
+		}
+		if mappingValue(body, "defaults") != nil {
+			job.Features = append(job.Features, support.Ref("github.defaults", "jobs."+id+".defaults.run", origin(mappingValue(body, "defaults"))))
+		}
+		if mappingValue(body, "outputs") != nil {
+			job.Features = append(job.Features, support.Ref("github.outputs", "jobs."+id+".outputs", origin(mappingValue(body, "outputs"))))
+		}
+		if mappingValue(body, "environment") != nil {
+			job.Features = append(job.Features, support.Ref("github.environment", "jobs."+id+".environment", origin(mappingValue(body, "environment"))))
+		}
+		if mappingValue(body, "permissions") != nil || mappingValue(body, "concurrency") != nil {
+			job.Features = append(job.Features, support.Ref("github.permissions-concurrency", "jobs."+id, origin(body)))
 		}
 		if job.If != "" {
 			job.Condition = &model.ConditionSpec{Provider: model.ProviderGitHub, Original: job.If, Kind: "if"}
@@ -250,6 +273,7 @@ func parseJobs(node *yaml.Node, workflowEnv map[string]string) ([]model.Job, err
 		if uses := scalarString(mappingValue(body, "uses")); uses != "" {
 			job.ReusableWorkflow = uses
 			job.Support = model.SupportUnsupported
+			job.Features = append(job.Features, support.Ref("github.reusable-workflow", "jobs."+id+".uses", origin(mappingValue(body, "uses"))))
 		}
 		job.HasContainer = mappingValue(body, "container") != nil
 		job.Services = parseServices(mappingValue(body, "services"))
@@ -258,9 +282,24 @@ func parseJobs(node *yaml.Node, workflowEnv map[string]string) ([]model.Job, err
 		if job.HasContainer || (job.HasStrategy && job.Matrix == nil) {
 			job.Support = model.SupportUnsupported
 		}
+		if job.HasContainer {
+			job.Features = append(job.Features, support.Ref("github.job-container", "jobs."+id+".container", origin(mappingValue(body, "container"))))
+		}
+		if job.HasServices {
+			job.Features = append(job.Features, support.Ref("github.services", "jobs."+id+".services", origin(mappingValue(body, "services"))))
+		}
+		if job.HasStrategy {
+			featureID := "github.matrix"
+			if job.Matrix == nil {
+				featureID = "github.unknown"
+			}
+			job.Features = append(job.Features, support.Ref(featureID, "jobs."+id+".strategy", origin(mappingValue(body, "strategy"))))
+		}
 		if job.If != "" {
 			job.Support = model.CombineSupport(job.Support, model.SupportPartial)
+			job.Features = append(job.Features, support.Ref("github.conditions", "jobs."+id+".if", origin(mappingValue(body, "if"))))
 		}
+		job.Features = append(job.Features, unknownRefs(body, githubJobKeys, "jobs."+id, "github.unknown")...)
 		for _, step := range job.Steps {
 			job.Support = model.CombineSupport(job.Support, step.Support)
 		}
@@ -297,8 +336,25 @@ func parseSteps(node *yaml.Node) []model.Step {
 			Origin:           &model.SourceOrigin{Line: item.Line, Column: item.Column},
 			Support:          model.SupportSupported,
 		}
+		stepPath := fmt.Sprintf("steps[%d]", i)
+		if step.Run != "" {
+			step.Features = append(step.Features, support.Ref("common.shell", stepPath+".run", origin(mappingValue(item, "run"))))
+			if containsExpression(step.Run) {
+				step.Features = append(step.Features, support.Ref("github.interpolation", stepPath+".run", origin(mappingValue(item, "run"))))
+			}
+		}
+		if mappingValue(item, "env") != nil {
+			step.Features = append(step.Features, support.Ref("github.env", stepPath+".env", origin(mappingValue(item, "env"))))
+		}
+		if mappingValue(item, "shell") != nil || mappingValue(item, "working-directory") != nil {
+			step.Features = append(step.Features, support.Ref("github.defaults", stepPath, origin(item)))
+		}
+		if step.ContinueOnError {
+			step.Features = append(step.Features, support.Ref("github.continue-on-error", stepPath+".continue-on-error", origin(mappingValue(item, "continue-on-error"))))
+		}
 		if step.If != "" {
 			step.Condition = &model.ConditionSpec{Provider: model.ProviderGitHub, Original: step.If, Kind: "if"}
+			step.Features = append(step.Features, support.Ref("github.conditions", stepPath+".if", origin(mappingValue(item, "if"))))
 		}
 		if step.Name == "" {
 			switch {
@@ -315,15 +371,27 @@ func parseSteps(node *yaml.Node) []model.Step {
 			step.Support = model.SupportSupported
 		case strings.HasPrefix(step.Uses, "actions/checkout@"):
 			step.Support = model.SupportPartial
+			step.Features = append(step.Features, support.Ref("github.checkout", stepPath+".uses", origin(mappingValue(item, "uses"))))
 		case strings.HasPrefix(step.Uses, "actions/setup-dotnet@"), strings.HasPrefix(step.Uses, "actions/setup-node@"):
 			step.Support = model.SupportPartial
-		case strings.HasPrefix(step.Uses, "./"), strings.Contains(step.Uses, "@"):
+			step.Features = append(step.Features, support.Ref("github.setup-runtime", stepPath+".uses", origin(mappingValue(item, "uses"))))
+		case strings.HasPrefix(step.Uses, "actions/upload-artifact@"), strings.HasPrefix(step.Uses, "actions/download-artifact@"), strings.HasPrefix(step.Uses, "actions/cache@"):
 			step.Support = model.SupportPartial
+			step.Features = append(step.Features, support.Ref("github.builtin-storage-action", stepPath+".uses", origin(mappingValue(item, "uses"))))
+		case strings.HasPrefix(step.Uses, "./"):
+			step.Support = model.SupportPartial
+			step.Features = append(step.Features, support.Ref("github.local-action", stepPath+".uses", origin(mappingValue(item, "uses"))))
+		case strings.Contains(step.Uses, "@"):
+			step.Support = model.SupportPartial
+			step.Features = append(step.Features, support.Ref("github.remote-action", stepPath+".uses", origin(mappingValue(item, "uses"))))
 		case step.Uses != "":
 			step.Support = model.SupportUnsupported
+			step.Features = append(step.Features, support.Ref("github.unsupported-action", stepPath+".uses", origin(mappingValue(item, "uses"))))
 		default:
 			step.Support = model.SupportUnsupported
+			step.Features = append(step.Features, support.Ref("common.empty-step", stepPath, origin(item)))
 		}
+		step.Features = append(step.Features, unknownRefs(item, githubStepKeys, stepPath, "github.unknown")...)
 		steps = append(steps, step)
 	}
 	return steps
@@ -563,4 +631,71 @@ func firstLine(value string) string {
 		return value[:61] + "..."
 	}
 	return value
+}
+
+var githubWorkflowKeys = map[string]bool{
+	"name": true, "run-name": true, "on": true, "permissions": true, "env": true,
+	"concurrency": true, "jobs": true,
+}
+
+var githubJobKeys = map[string]bool{
+	"name": true, "runs-on": true, "needs": true, "if": true, "env": true,
+	"outputs": true, "environment": true, "steps": true, "uses": true, "with": true,
+	"secrets": true, "container": true, "services": true, "strategy": true,
+	"defaults": true, "permissions": true, "concurrency": true,
+}
+
+var githubStepKeys = map[string]bool{
+	"id": true, "name": true, "uses": true, "run": true, "shell": true,
+	"working-directory": true, "if": true, "env": true, "with": true,
+	"continue-on-error": true,
+}
+
+func githubWorkflowFeatures(root *yaml.Node) []model.FeatureRef {
+	features := []model.FeatureRef{support.Ref("github.metadata", "workflow", origin(root))}
+	if mappingValue(root, "on") != nil {
+		features = append(features, support.Ref("github.triggers", "on", origin(mappingValue(root, "on"))))
+	}
+	if mappingValue(root, "env") != nil {
+		features = append(features, support.Ref("github.env", "env", origin(mappingValue(root, "env"))))
+	}
+	if mappingValue(root, "permissions") != nil || mappingValue(root, "concurrency") != nil {
+		features = append(features, support.Ref("github.permissions-concurrency", "workflow", origin(root)))
+	}
+	for _, trigger := range parseTriggers(mappingValue(root, "on")) {
+		if trigger.Name == "workflow_call" {
+			features = append(features, support.Ref("github.reusable-workflow", "on.workflow_call", origin(mappingValue(root, "on"))))
+		}
+	}
+	return append(features, unknownRefs(root, githubWorkflowKeys, "", "github.unknown")...)
+}
+
+func unknownRefs(node *yaml.Node, known map[string]bool, prefix, featureID string) []model.FeatureRef {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	result := []model.FeatureRef{}
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		key := node.Content[index]
+		if known[key.Value] {
+			continue
+		}
+		path := key.Value
+		if prefix != "" {
+			path = prefix + "." + key.Value
+		}
+		result = append(result, support.Ref(featureID, path, origin(key)))
+	}
+	return result
+}
+
+func origin(node *yaml.Node) *model.SourceOrigin {
+	if node == nil {
+		return nil
+	}
+	return &model.SourceOrigin{Line: node.Line, Column: node.Column}
+}
+
+func containsExpression(value string) bool {
+	return strings.Contains(value, "${{") && strings.Contains(value, "}}")
 }

@@ -48,6 +48,18 @@ jobs:
 	if workflow.Jobs[1].Support != model.SupportPartial {
 		t.Fatalf("deploy support = %s, want partial", workflow.Jobs[1].Support)
 	}
+	if !githubHasFeature(workflow.Jobs[1].Steps[0].Features, "github.remote-action") {
+		t.Fatal("expected stable remote action feature id")
+	}
+}
+
+func githubHasFeature(features []model.FeatureRef, id string) bool {
+	for _, feature := range features {
+		if feature.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseReusableWorkflowJob(t *testing.T) {
@@ -103,5 +115,30 @@ jobs:
 	}
 	if got := workflow.Jobs[1].Steps[1].WorkingDirectory; got != "frontend" {
 		t.Fatalf("working directory = %q, want frontend", got)
+	}
+}
+
+func TestEmptyAndUnknownStepsHaveStructuredFeatureReferences(t *testing.T) {
+	workflow, err := parseWorkflow(".github/workflows/invalid.yml", []byte(`
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Empty
+      - name: Unknown
+        timeout-minutes: 2
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !githubHasFeature(workflow.Jobs[0].Steps[0].Features, "common.empty-step") {
+		t.Fatal("empty step must be explicitly unsupported")
+	}
+	if !githubHasFeature(workflow.Jobs[0].Steps[1].Features, "github.unknown") {
+		t.Fatal("unknown step key must be explicit")
+	}
+	if origin := workflow.Jobs[0].Steps[0].Features[0].Origin; origin == nil || origin.File == "" || origin.Line == 0 {
+		t.Fatalf("missing source location: %#v", origin)
 	}
 }

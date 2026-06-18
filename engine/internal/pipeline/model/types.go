@@ -8,6 +8,7 @@ import (
 type ProviderID string
 
 const (
+	ProviderCommon ProviderID = "common"
 	ProviderGitHub ProviderID = "github"
 	ProviderGitLab ProviderID = "gitlab"
 	ProviderAzure  ProviderID = "azure"
@@ -16,9 +17,14 @@ const (
 type SupportLevel string
 
 const (
-	SupportSupported   SupportLevel = "supported"
-	SupportPartial     SupportLevel = "partial"
-	SupportUnsupported SupportLevel = "unsupported"
+	SupportSupportedLocal  SupportLevel = "supported-local"
+	SupportEmulated        SupportLevel = "emulated"
+	SupportPartial         SupportLevel = "partial"
+	SupportValidationOnly  SupportLevel = "validation-only"
+	SupportUnsupported     SupportLevel = "unsupported"
+	SupportRequiresConsent SupportLevel = "requires-consent"
+
+	SupportSupported = SupportSupportedLocal
 )
 
 type IssueSeverity string
@@ -130,6 +136,7 @@ type Workflow struct {
 	Jobs          []Job            `json:"jobs"`
 	Graph         Graph            `json:"graph"`
 	Validation    ValidationReport `json:"validation"`
+	Features      []FeatureRef     `json:"featureRefs,omitempty"`
 	Unsupported   []FeatureSupport `json:"unsupportedFeatures,omitempty"`
 	ExecutionPlan *ExecutionPlan   `json:"executionPlan,omitempty"`
 }
@@ -155,6 +162,7 @@ type Job struct {
 	Environment      string            `json:"environment,omitempty"`
 	Origin           *SourceOrigin     `json:"origin,omitempty"`
 	Support          SupportLevel      `json:"support"`
+	Features         []FeatureRef      `json:"featureRefs,omitempty"`
 	Unsupported      []FeatureSupport  `json:"unsupportedFeatures,omitempty"`
 	ReusableWorkflow string            `json:"-"`
 	HasContainer     bool              `json:"-"`
@@ -176,6 +184,7 @@ type Step struct {
 	ContinueOnError  bool              `json:"continueOnError,omitempty"`
 	Origin           *SourceOrigin     `json:"origin,omitempty"`
 	Support          SupportLevel      `json:"support"`
+	Features         []FeatureRef      `json:"featureRefs,omitempty"`
 	Unsupported      []FeatureSupport  `json:"unsupportedFeatures,omitempty"`
 }
 
@@ -207,11 +216,37 @@ type ValidationIssue struct {
 }
 
 type FeatureSupport struct {
-	Feature string       `json:"feature"`
-	Path    string       `json:"path,omitempty"`
-	Support SupportLevel `json:"support"`
-	Message string       `json:"message"`
+	FeatureID            string             `json:"featureId"`
+	Feature              string             `json:"feature"`
+	Provider             ProviderID         `json:"provider"`
+	Category             string             `json:"category"`
+	Path                 string             `json:"path,omitempty"`
+	Origin               *SourceOrigin      `json:"origin,omitempty"`
+	Support              SupportLevel       `json:"support"`
+	RuntimeDisposition   RuntimeDisposition `json:"runtimeDisposition"`
+	Message              string             `json:"message"`
+	LocalBehavior        string             `json:"localBehavior"`
+	HostedDifferences    string             `json:"hostedDifferences"`
+	SecurityImplications string             `json:"securityImplications"`
+	Fallback             string             `json:"fallback"`
+	Documentation        string             `json:"documentation"`
 }
+
+type FeatureRef struct {
+	ID     string        `json:"id"`
+	Path   string        `json:"path,omitempty"`
+	Origin *SourceOrigin `json:"origin,omitempty"`
+}
+
+type RuntimeDisposition string
+
+const (
+	RuntimeExecute     RuntimeDisposition = "execute"
+	RuntimeEmulate     RuntimeDisposition = "emulate"
+	RuntimeInspectOnly RuntimeDisposition = "inspect-only"
+	RuntimeReject      RuntimeDisposition = "reject"
+	RuntimeConsent     RuntimeDisposition = "consent"
+)
 
 type ValidationReport struct {
 	Valid    bool              `json:"valid"`
@@ -316,14 +351,56 @@ type CacheRecord struct {
 }
 
 func CombineSupport(levels ...SupportLevel) SupportLevel {
-	result := SupportSupported
+	result := SupportSupportedLocal
 	for _, level := range levels {
-		if level == SupportUnsupported {
-			return SupportUnsupported
-		}
-		if level == SupportPartial {
-			result = SupportPartial
+		if supportRank(level) > supportRank(result) {
+			result = level
 		}
 	}
 	return result
+}
+
+func ApplySourceFile(workflow *Workflow, file string) {
+	if workflow == nil {
+		return
+	}
+	setOriginFile := func(origin *SourceOrigin) {
+		if origin != nil && origin.File == "" {
+			origin.File = file
+		}
+	}
+	for index := range workflow.Features {
+		setOriginFile(workflow.Features[index].Origin)
+	}
+	for jobIndex := range workflow.Jobs {
+		job := &workflow.Jobs[jobIndex]
+		setOriginFile(job.Origin)
+		for index := range job.Features {
+			setOriginFile(job.Features[index].Origin)
+		}
+		for stepIndex := range job.Steps {
+			step := &job.Steps[stepIndex]
+			setOriginFile(step.Origin)
+			for index := range step.Features {
+				setOriginFile(step.Features[index].Origin)
+			}
+		}
+	}
+}
+
+func supportRank(level SupportLevel) int {
+	switch level {
+	case SupportUnsupported:
+		return 5
+	case SupportValidationOnly:
+		return 4
+	case SupportRequiresConsent:
+		return 3
+	case SupportPartial:
+		return 2
+	case SupportEmulated:
+		return 1
+	default:
+		return 0
+	}
 }

@@ -54,9 +54,21 @@ stages:
 	if workflow.Jobs[1].Support != model.SupportPartial {
 		t.Fatalf("package support = %s, want partial task support", workflow.Jobs[1].Support)
 	}
+	if !azureHasFeature(workflow.Jobs[1].Steps[0].Features, "azure.task-storage") {
+		t.Fatal("expected stable artifact task feature id")
+	}
 	if got := workflow.Jobs[2].Needs; len(got) != 2 || got[0] != "Build.compile" || got[1] != "Build.package" {
 		t.Fatalf("test implicit stage needs = %v, want build stage jobs", got)
 	}
+}
+
+func azureHasFeature(features []model.FeatureRef, id string) bool {
+	for _, feature := range features {
+		if feature.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseAzureRootSteps(t *testing.T) {
@@ -74,5 +86,33 @@ steps:
 	}
 	if workflow.Jobs[0].Runner != "ubuntu-latest" {
 		t.Fatalf("runner = %q, want ubuntu-latest", workflow.Jobs[0].Runner)
+	}
+}
+
+func TestAzureTemplatesResourcesAndTimeoutsAreExplicit(t *testing.T) {
+	workflow, err := parseWorkflow("azure-pipelines.yml", []byte(`
+parameters:
+  - name: target
+resources:
+  repositories: []
+jobs:
+  - job: test
+    timeoutInMinutes: 10
+    steps:
+      - template: steps.yml
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"azure.parameters", "azure.resources"} {
+		if !azureHasFeature(workflow.Features, id) {
+			t.Fatalf("missing %s", id)
+		}
+	}
+	if !azureHasFeature(workflow.Jobs[0].Features, "azure.timeout") {
+		t.Fatal("missing timeout support reference")
+	}
+	if !azureHasFeature(workflow.Jobs[0].Steps[0].Features, "azure.templates") {
+		t.Fatal("missing template support reference")
 	}
 }
