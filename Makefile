@@ -1,4 +1,4 @@
-.PHONY: install desktop engine test dmg clean
+.PHONY: install desktop engine test package dmg linux windows clean
 
 install:
 	npm install
@@ -15,8 +15,17 @@ test:
 	npm --workspace packages/shared-types run build
 	npm --workspace apps/desktop run typecheck
 
-dmg: engine
-	npm --workspace apps/desktop run make -- --platform=darwin
+package:
+	node scripts/make-desktop.mjs
+
+dmg:
+	node scripts/make-desktop.mjs darwin
+
+linux:
+	node scripts/make-desktop.mjs linux x64
+
+windows:
+	node scripts/make-desktop.mjs win32 x64
 
 clean:
 	rm -rf apps/desktop/.vite apps/desktop/out apps/desktop/node_modules packages/shared-types/dist node_modules engine/bin

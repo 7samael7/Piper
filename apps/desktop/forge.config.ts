@@ -8,6 +8,20 @@ import { VitePlugin } from "@electron-forge/plugin-vite";
 import path from "node:path";
 
 const appIcon = path.resolve(__dirname, "assets/piper-app");
+const appIconPng = `${appIcon}.png`;
+const engineBinary = process.env.PIPER_ENGINE_BINARY
+  ? path.resolve(process.env.PIPER_ENGINE_BINARY)
+  : path.resolve(__dirname, `../../engine/bin/${process.platform === "win32" ? "piper-engine.exe" : "piper-engine"}`);
+const linuxPackageOptions = {
+  name: "piper",
+  bin: "Piper",
+  productName: "Piper",
+  genericName: "CI/CD Workbench",
+  description: "Local CI/CD workbench desktop app",
+  productDescription: "Inspect, validate, visualize, and run CI/CD pipelines locally.",
+  homepage: "https://github.com/7samael7/Piper",
+  icon: appIconPng,
+};
 
 const notarize =
   process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID
@@ -23,13 +37,16 @@ const config: ForgeConfig = {
     asar: true,
     appBundleId: "dev.piper.desktop",
     icon: appIcon,
-    extraResource: ["../../engine/bin/piper-engine", "update-config.json", "assets/piper-app.png"],
+    extraResource: [engineBinary, "update-config.json", appIconPng],
     ...(process.env.APPLE_SIGN_IDENTITY ? { osxSign: { identity: process.env.APPLE_SIGN_IDENTITY } } : {}),
     ...(notarize ? { osxNotarize: notarize } : {}),
   },
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({
+      name: "Piper",
+      authors: "Piper contributors",
+      setupExe: "Piper Setup.exe",
       setupIcon: `${appIcon}.ico`,
     }),
     new MakerZIP({}, ["darwin"]),
@@ -37,8 +54,20 @@ const config: ForgeConfig = {
       format: "ULFO",
       name: "Piper",
     }),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerRpm({
+      options: {
+        ...linuxPackageOptions,
+        categories: ["Development"],
+        license: "Proprietary",
+      },
+    }),
+    new MakerDeb({
+      options: {
+        ...linuxPackageOptions,
+        categories: ["Development"],
+        maintainer: "Piper contributors",
+      },
+    }),
   ],
   plugins: [
     new VitePlugin({

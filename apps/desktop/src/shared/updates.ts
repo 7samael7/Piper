@@ -4,6 +4,7 @@ export interface UpdateCheckResult {
   status: UpdateStatus;
   currentVersion: string;
   latestVersion?: string;
+  assetName?: string;
   downloadUrl?: string;
   checksumUrl?: string;
   releaseUrl?: string;

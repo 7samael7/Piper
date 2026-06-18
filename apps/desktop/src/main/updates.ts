@@ -29,11 +29,11 @@ export class UpdateService {
 
   async check(): Promise<UpdateCheckResult> {
     const currentVersion = app.getVersion();
-    if (process.platform !== "darwin") {
+    if (!["darwin", "linux", "win32"].includes(process.platform)) {
       return this.remember({
         status: "unavailable",
         currentVersion,
-        message: "DMG update checks are available on macOS.",
+        message: "Update checks are not available on this platform.",
       });
     }
     const config = loadUpdateConfig();
@@ -73,11 +73,12 @@ export class UpdateService {
         });
       }
 
-      const selectedAsset = selectDmgAsset(release.assets ?? []);
+      const selectedAsset = selectInstallerAsset(release.assets ?? []);
       return this.remember({
         status: "available",
         currentVersion,
         latestVersion,
+        assetName: selectedAsset?.assetName,
         downloadUrl: selectedAsset?.downloadUrl,
         checksumUrl: selectedAsset?.checksumUrl,
         releaseUrl,
@@ -99,10 +100,10 @@ export class UpdateService {
       return;
     }
     if (!result.downloadUrl || !result.latestVersion) {
-      throw new Error("The latest release does not contain a downloadable macOS installer.");
+      throw new Error(`The latest release does not contain a downloadable ${platformName()} installer.`);
     }
 
-    const filename = `Piper-${result.latestVersion}-${process.arch}.dmg`;
+    const filename = path.basename(result.assetName ?? `Piper-${result.latestVersion}-${process.arch}${preferredInstallerExtensions()[0]}`);
     const destination = path.join(app.getPath("downloads"), filename);
     const temporaryPath = `${destination}.download`;
     const headers = updateRequestHeaders();
@@ -122,6 +123,7 @@ export class UpdateService {
           throw new Error("The downloaded installer failed SHA-256 verification.");
         }
       }
+      fs.rmSync(destination, { force: true });
       fs.renameSync(temporaryPath, destination);
     } finally {
       fs.rmSync(temporaryPath, { force: true });
@@ -175,20 +177,65 @@ function loadUpdateConfig(): UpdateConfig | undefined {
   }
 }
 
-function selectDmgAsset(assets: GitHubReleaseAsset[]): { downloadUrl: string; checksumUrl?: string } | undefined {
-  const dmgAssets = assets.filter((asset) => asset.name.toLowerCase().endsWith(".dmg"));
+export function selectInstallerAsset(
+  assets: GitHubReleaseAsset[],
+): { assetName: string; downloadUrl: string; checksumUrl?: string } | undefined {
+  const extensions = preferredInstallerExtensions();
   const architectureNames = process.arch === "arm64" ? ["arm64", "aarch64"] : ["x64", "amd64", "x86_64"];
-  const selected =
-    dmgAssets.find((asset) => architectureNames.some((architecture) => asset.name.toLowerCase().includes(architecture))) ??
-    (dmgAssets.length === 1 ? dmgAssets[0] : undefined);
+  let selected: GitHubReleaseAsset | undefined;
+  for (const extension of extensions) {
+    const candidates = assets.filter((asset) => asset.name.toLowerCase().endsWith(extension));
+    selected =
+      candidates.find((asset) => architectureNames.some((architecture) => asset.name.toLowerCase().includes(architecture))) ??
+      (candidates.length === 1 ? candidates[0] : undefined);
+    if (selected) {
+      break;
+    }
+  }
   if (!selected) {
     return undefined;
   }
   const checksum = assets.find((asset) => asset.name === `${selected.name}.sha256`);
   return {
+    assetName: selected.name,
     downloadUrl: safeExternalUrl(selected.url || selected.browser_download_url),
     checksumUrl: optionalSafeExternalUrl(checksum?.url ?? checksum?.browser_download_url),
   };
+}
+
+function preferredInstallerExtensions(): string[] {
+  switch (process.platform) {
+    case "darwin":
+      return [".dmg"];
+    case "win32":
+      return [".exe"];
+    case "linux":
+      return prefersRpm() ? [".rpm", ".deb"] : [".deb", ".rpm"];
+    default:
+      return [""];
+  }
+}
+
+function prefersRpm(): boolean {
+  try {
+    const osRelease = fs.readFileSync("/etc/os-release", "utf8").toLowerCase();
+    return /(?:^|[=\"'\s])(fedora|rhel|centos|rocky|almalinux|suse|opensuse)(?:[\"'\s]|$)/m.test(osRelease);
+  } catch {
+    return false;
+  }
+}
+
+function platformName(): string {
+  switch (process.platform) {
+    case "darwin":
+      return "macOS";
+    case "win32":
+      return "Windows";
+    case "linux":
+      return "Linux";
+    default:
+      return process.platform;
+  }
 }
 
 function normalizeVersion(value: string): string {

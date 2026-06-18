@@ -9,6 +9,10 @@
   "scripts": {
     "desktop": "npm --workspace apps/desktop run start",
     "desktop:build": "npm --workspace apps/desktop run package",
+    "desktop:make": "node scripts/make-desktop.mjs",
+    "desktop:make:linux": "node scripts/make-desktop.mjs linux x64",
+    "desktop:make:mac": "node scripts/make-desktop.mjs darwin",
+    "desktop:make:windows": "node scripts/make-desktop.mjs win32 x64",
     "shared:build": "npm --workspace packages/shared-types run build"
   }
 }
