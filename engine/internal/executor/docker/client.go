@@ -100,11 +100,10 @@ func dockerEndpointCandidates() []endpointCandidate {
 
 func activeDockerContext() (string, string) {
 	contextName := strings.TrimSpace(os.Getenv("DOCKER_CONTEXT"))
-	home, err := os.UserHomeDir()
+	dockerConfigDir, err := dockerConfigDirectory()
 	if err != nil {
 		return "", ""
 	}
-	dockerConfigDir := filepath.Join(home, ".docker")
 
 	if contextName == "" {
 		data, err := os.ReadFile(filepath.Join(dockerConfigDir, "config.json"))
@@ -142,6 +141,17 @@ func activeDockerContext() (string, string) {
 		}
 	}
 	return contextName, ""
+}
+
+func dockerConfigDirectory() (string, error) {
+	if configDir := strings.TrimSpace(os.Getenv("DOCKER_CONFIG")); configDir != "" {
+		return configDir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".docker"), nil
 }
 
 func appendSocketCandidates(candidates []endpointCandidate, home string, paths ...string) []endpointCandidate {

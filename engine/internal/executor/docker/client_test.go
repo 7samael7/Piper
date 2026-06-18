@@ -8,14 +8,14 @@ import (
 )
 
 func TestActiveDockerContextReadsEndpoint(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	dockerConfigDir := filepath.Join(t.TempDir(), "docker-config")
+	t.Setenv("DOCKER_CONFIG", dockerConfigDir)
 	t.Setenv("DOCKER_CONTEXT", "")
 
-	writeJSON(t, filepath.Join(home, ".docker", "config.json"), map[string]string{
+	writeJSON(t, filepath.Join(dockerConfigDir, "config.json"), map[string]string{
 		"currentContext": "orbstack",
 	})
-	writeJSON(t, filepath.Join(home, ".docker", "contexts", "meta", "context-id", "meta.json"), map[string]interface{}{
+	writeJSON(t, filepath.Join(dockerConfigDir, "contexts", "meta", "context-id", "meta.json"), map[string]interface{}{
 		"Name": "orbstack",
 		"Endpoints": map[string]interface{}{
 			"docker": map[string]interface{}{
@@ -34,12 +34,12 @@ func TestActiveDockerContextReadsEndpoint(t *testing.T) {
 }
 
 func TestDockerEndpointCandidatesPreferEnvironmentAndContext(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	dockerConfigDir := filepath.Join(t.TempDir(), "docker-config")
+	t.Setenv("DOCKER_CONFIG", dockerConfigDir)
 	t.Setenv("DOCKER_HOST", "unix:///tmp/explicit-docker.sock")
 	t.Setenv("DOCKER_CONTEXT", "colima")
 
-	writeJSON(t, filepath.Join(home, ".docker", "contexts", "meta", "context-id", "meta.json"), map[string]interface{}{
+	writeJSON(t, filepath.Join(dockerConfigDir, "contexts", "meta", "context-id", "meta.json"), map[string]interface{}{
 		"Name": "colima",
 		"Endpoints": map[string]interface{}{
 			"docker": map[string]interface{}{
