@@ -132,8 +132,8 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 980,
-    minWidth: 1100,
-    minHeight: 760,
+    minWidth: 900,
+    minHeight: 620,
     title: "Piper",
     backgroundColor: "#f7f8f3",
     icon: resolveWindowIcon(),

@@ -1,7 +1,7 @@
 {
   "name": "@piper/desktop",
   "productName": "Piper",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "description": "Local CI/CD workbench desktop app",
   "main": ".vite/build/main.js",

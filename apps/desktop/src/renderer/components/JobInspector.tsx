@@ -54,7 +54,7 @@ export function JobInspector({ workflow, selectedJobId, jobStates, stepStates }:
             options={{
               readOnly: true,
               minimap: { enabled: false },
-              fontSize: 13,
+              fontSize: 11,
               scrollBeyondLastLine: false,
               wordWrap: "on",
             }}

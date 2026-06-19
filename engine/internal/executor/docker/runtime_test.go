@@ -156,6 +156,32 @@ func TestBuildEnvEnablesDotnetRuntimeRollForward(t *testing.T) {
 	}
 }
 
+func TestBuildEnvWithContextPreservesDotnetRuntimeRollForward(t *testing.T) {
+	request := model.RunRequest{Provider: model.ProviderGitHub}
+	job := model.Job{
+		ID: "backend",
+		Steps: []model.Step{{
+			Uses: "actions/setup-dotnet@v5",
+			With: map[string]string{"dotnet-version": "9.0.x"},
+		}},
+	}
+	instance := model.JobInstance{
+		ID:           job.ID,
+		LogicalJobID: job.ID,
+		Name:         job.ID,
+		Job:          job,
+	}
+	runtime := newRuntimeContext(request, instance, nil)
+
+	env, err := buildEnvWithContext(request, job, model.Step{}, runtime, "/tmp/piper-output")
+	if err != nil {
+		t.Fatalf("build contextual environment: %v", err)
+	}
+	if !containsEnv(env, "DOTNET_ROLL_FORWARD=Major") {
+		t.Fatalf("expected DOTNET_ROLL_FORWARD in contextual step environment: %v", env)
+	}
+}
+
 func containsEnv(env []string, expected string) bool {
 	for _, value := range env {
 		if value == expected {
