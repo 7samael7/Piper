@@ -310,7 +310,7 @@ export function App() {
         </div>
       </aside>
 
-      <main className="main-shell">
+      <main className={error ? "main-shell has-error" : "main-shell"}>
         <header className="topbar">
           <div>
             <h1>{selectedWorkflow?.name ?? "Piper"}</h1>
@@ -345,7 +345,7 @@ export function App() {
 
         {error ? <div className="error-banner">{error}</div> : null}
 
-        <section className="config-strip">
+        <section className="config-strip run-config-strip">
           <KeyValueEditor label="Inputs" value={inputsText} onChange={setInputsText} />
           <KeyValueEditor label="Environment" value={envText} onChange={setEnvText} />
           <KeyValueEditor label="Secrets" value={secretsText} onChange={setSecretsText} secret />
@@ -358,7 +358,7 @@ export function App() {
           <JobInspector workflow={selectedWorkflow} selectedJobId={selectedJobId} jobStates={jobStates} stepStates={stepStates} />
         </section>
 
-        <section className="config-strip">
+        <section className="config-strip resources-strip">
           <div>
             <strong>Artifacts</strong>
             {(artifactsQuery.data ?? []).length === 0 ? <p className="muted">No local artifacts.</p> : null}
@@ -419,7 +419,12 @@ export function App() {
             <span>Live Logs</span>
             {activeRunId ? <strong>{activeRunId}</strong> : <span className="muted">idle</span>}
           </div>
-          <LogTerminal events={runEvents} />
+          <LogTerminal
+            events={runEvents}
+            workflow={selectedWorkflow}
+            selectedJobId={selectedJobId}
+            onSelectJob={setSelectedJobId}
+          />
         </section>
       </main>
     </div>

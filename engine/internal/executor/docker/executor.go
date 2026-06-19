@@ -563,7 +563,7 @@ func buildEnv(request model.RunRequest, job model.Job, step model.Step) []string
 
 func buildEnvWithContext(request model.RunRequest, job model.Job, step model.Step, runtime *runtimeContext, outputFile string) ([]string, error) {
 	values := map[string]string{}
-	for _, entry := range buildEnv(request, model.Job{}, model.Step{}) {
+	for _, entry := range buildEnv(request, job, model.Step{}) {
 		key, value, _ := strings.Cut(entry, "=")
 		values[key] = value
 	}
