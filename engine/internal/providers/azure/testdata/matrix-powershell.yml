@@ -4,9 +4,9 @@ jobs:
       maxParallel: 2
       matrix:
         linux:
-          NODE_VERSION: "20"
+          NODE_VERSION: "24"
         current:
-          NODE_VERSION: "22"
+          NODE_VERSION: "26"
     steps:
       - pwsh: Write-Output "Node $env:NODE_VERSION"
       - task: Cache@2

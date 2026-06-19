@@ -39,9 +39,9 @@ Some releases may be unsigned. macOS Gatekeeper and Windows SmartScreen can warn
 
 Requirements:
 
-- Node.js 24 (the primary CI baseline)
+- Node.js 26 (the primary CI baseline)
 - npm
-- Go 1.25 or newer
+- Go 1.26 or newer
 - Docker Desktop, OrbStack, Colima, or another Docker-compatible daemon for local execution
 
 Docker is not required to discover, inspect, validate, or visualize workflows.
@@ -148,7 +148,7 @@ Support classifications come from the machine-readable registry used by validati
 
 ## Images and runtimes
 
-- The default image is `ubuntu:22.04`.
+- The default image is `ubuntu:26.04`.
 - A GitLab job's `image` is used when present.
 - GitHub `actions/setup-node`, `actions/setup-go`, and `actions/setup-dotnet` select a matching Node, Go, or .NET SDK image when Piper can map the requested version.
 - GitHub `runs-on` and Azure `pool` values are shown but do not select a hosted runner image.

@@ -25,11 +25,11 @@ func TestPostgresAndRedisServices(t *testing.T) {
 	defer networkState.cleanup(cli)
 	services := []model.ServiceSpec{
 		{
-			Name: "postgres", Image: "postgres:16",
+			Name: "postgres", Image: "postgres:18",
 			Env:     map[string]string{"POSTGRES_PASSWORD": "piper", "POSTGRES_DB": "piper"},
 			Aliases: []string{"postgres"}, StartupTimeout: 90,
 		},
-		{Name: "redis", Image: "redis:7", Aliases: []string{"redis"}, StartupTimeout: 60},
+		{Name: "redis", Image: "redis:8", Aliases: []string{"redis"}, StartupTimeout: 60},
 	}
 	if err := startServices(ctx, cli, networkState, services, func(logs.Event) {}, secrets.NewMasker(nil)); err != nil {
 		t.Fatal(err)

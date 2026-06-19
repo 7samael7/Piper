@@ -34,9 +34,9 @@ func TestCompatibilityEventContainsSupportContract(t *testing.T) {
 
 func TestSetupActionsDoNotRequireThirdPartyConsent(t *testing.T) {
 	for _, reference := range []string{
-		"actions/setup-node@v4",
-		"actions/setup-go@v5",
-		"actions/setup-dotnet@v4",
+		"actions/setup-node@v6",
+		"actions/setup-go@v6",
+		"actions/setup-dotnet@v5",
 	} {
 		if !isBuiltinActionReference(reference) {
 			t.Fatalf("%s must be classified as a built-in emulated action", reference)

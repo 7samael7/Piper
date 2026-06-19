@@ -116,7 +116,7 @@ func normalizedRuntimeVersion(value string, requireMinor bool) (string, error) {
 
 	matches := runtimeVersionPattern.FindStringSubmatch(value)
 	if matches == nil {
-		return "", fmt.Errorf("expected a version such as 8.0.x or 20")
+		return "", fmt.Errorf("expected a version such as 10.0.x or 26")
 	}
 
 	major := matches[1]

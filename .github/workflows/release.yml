@@ -34,7 +34,7 @@ jobs:
       target_sha: ${{ steps.release.outputs.target_sha }}
       should_release: ${{ steps.release.outputs.should_release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
@@ -98,19 +98,21 @@ jobs:
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.target_sha }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
+
+      - run: npm install --global npm@11.16.0
 
       - name: Set release version
         env:
@@ -182,7 +184,7 @@ jobs:
             shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256"
           )
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: piper-dmg-${{ matrix.arch }}
           path: release/*
@@ -194,19 +196,21 @@ jobs:
     if: ${{ needs.prepare.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.target_sha }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
+
+      - run: npm install --global npm@11.16.0
 
       - name: Install packaging tools
         run: |
@@ -256,7 +260,7 @@ jobs:
             sha256sum "$RPM_NAME" > "$RPM_NAME.sha256"
           )
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: piper-linux-x64
           path: release/*
@@ -268,19 +272,21 @@ jobs:
     if: ${{ needs.prepare.outputs.should_release == 'true' }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.target_sha }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
+
+      - run: npm install --global npm@11.16.0
 
       - name: Set release version
         env:
@@ -323,7 +329,7 @@ jobs:
           $checksum = (Get-FileHash -Algorithm SHA256 $destination).Hash.ToLower()
           "$checksum  $name" | Set-Content -Encoding ascii "$destination.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: piper-windows-x64
           path: release/*
@@ -335,7 +341,7 @@ jobs:
     if: ${{ needs.prepare.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: piper-*
           path: release

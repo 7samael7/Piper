@@ -27,10 +27,10 @@ stages:
         displayName: Unit Tests
         strategy:
           matrix:
-            node20:
-              NODE_VERSION: "20"
-            node22:
-              NODE_VERSION: "22"
+            node24:
+              NODE_VERSION: "24"
+            node26:
+              NODE_VERSION: "26"
           maxParallel: 2
         steps:
           - task: Cache@2

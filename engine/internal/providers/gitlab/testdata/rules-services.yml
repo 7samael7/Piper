@@ -3,7 +3,7 @@ test:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   services:
-    - name: postgres:16
+    - name: postgres:18
       alias: db
   cache:
     key: dependencies

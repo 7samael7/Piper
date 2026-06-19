@@ -3,7 +3,7 @@ stages:
   - test
   - deploy
 
-image: ubuntu:22.04
+image: ubuntu:26.04
 
 variables:
   APP_ENV: local
@@ -19,7 +19,7 @@ test:
   needs:
     - build
   services:
-    - name: redis:7
+    - name: redis:8
       alias: redis
   cache:
     key: example-cache

@@ -49,7 +49,7 @@ func NewExecutor() *Executor {
 	artifactStore, _ := artifacts.OpenDefault()
 	cacheStore, _ := caches.OpenDefault()
 	actionResolver, _ := actions.OpenDefault()
-	return &Executor{image: "ubuntu:22.04", artifacts: artifactStore, caches: cacheStore, actions: actionResolver}
+	return &Executor{image: "ubuntu:26.04", artifacts: artifactStore, caches: cacheStore, actions: actionResolver}
 }
 
 func (e *Executor) Artifacts() *artifacts.Store { return e.artifacts }

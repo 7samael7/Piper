@@ -9,7 +9,7 @@ import (
 func TestParseGitLabStagesNeedsImageAndUnsupportedFeatures(t *testing.T) {
 	workflow, err := parseWorkflow(".gitlab-ci.yml", []byte(`
 stages: [build, test, deploy]
-image: golang:1.24
+image: golang:1.26
 variables:
   GOFLAGS: -mod=mod
 include:
@@ -25,7 +25,7 @@ test:
   needs:
     - build
   services:
-    - postgres:16
+    - postgres:18
   script: go test ./...
 
 deploy:
@@ -45,8 +45,8 @@ deploy:
 	if len(workflow.Jobs) != 3 {
 		t.Fatalf("jobs = %d, want 3", len(workflow.Jobs))
 	}
-	if workflow.Jobs[0].Image != "golang:1.24" {
-		t.Fatalf("build image = %q, want golang:1.24", workflow.Jobs[0].Image)
+	if workflow.Jobs[0].Image != "golang:1.26" {
+		t.Fatalf("build image = %q, want golang:1.26", workflow.Jobs[0].Image)
 	}
 	if got := workflow.Jobs[1].Needs; len(got) != 1 || got[0] != "build" {
 		t.Fatalf("test needs = %v, want [build]", got)
@@ -114,7 +114,7 @@ func TestGitLabGlobalDefaultsAndEmptyJobsCannotSilentlySucceed(t *testing.T) {
 cache:
   paths: [.cache]
 services:
-  - redis:7
+  - redis:8
 EMPTY_GLOBAL: value
 empty:
   stage: test

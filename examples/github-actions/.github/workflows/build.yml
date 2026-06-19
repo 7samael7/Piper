@@ -15,7 +15,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Print environment
         env:
           INPUT_GREETING: ${{ inputs.greeting || 'Hello from Piper' }}
@@ -31,14 +31,14 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        node: [20, 22]
+        node: [24, 26]
     services:
       redis:
-        image: redis:7
+        image: redis:8
     env:
       NODE_ENV: test
     steps:
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           key: example-${{ matrix.node }}
           path: .piper-example-cache
@@ -48,7 +48,7 @@ jobs:
           echo "Running local CI test step"
           echo "NODE_ENV=$NODE_ENV"
           echo "node=${{ matrix.node }}" > dist/result.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: result-${{ matrix.node }}
           path: dist

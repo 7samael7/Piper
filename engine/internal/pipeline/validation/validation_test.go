@@ -38,7 +38,7 @@ func TestValidationAggregatesSixStateSupport(t *testing.T) {
 				Features: []model.FeatureRef{{ID: "github.runner"}},
 				Steps: []model.Step{
 					{
-						Name: "checkout", Uses: "actions/checkout@v4",
+						Name: "checkout", Uses: "actions/checkout@v7",
 						Features: []model.FeatureRef{{ID: "github.checkout"}},
 					},
 				},

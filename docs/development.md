@@ -6,12 +6,12 @@ This guide covers the local toolchain, repository layout, common commands, engin
 
 The project currently targets:
 
-- Node.js 24 in the primary CI workflow
+- Node.js 26 in the primary CI workflow
 - Node.js 22 in the release-packaging workflow
-- npm workspaces
-- Go 1.25 from `engine/go.mod`
-- Electron 39
-- TypeScript 5.8
+- npm 11.16 with workspaces
+- Go 1.26 from `engine/go.mod`
+- Electron 42
+- TypeScript 6.0
 - React 19
 - Docker Engine API through the Go Docker SDK
 

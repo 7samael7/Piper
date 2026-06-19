@@ -39,7 +39,7 @@ Install it with your graphical package manager or the distribution's normal pack
 
 ### From source
 
-Install Node.js 24 (the primary CI baseline), npm, and Go 1.25+. Then:
+Install Node.js 26 (the primary CI baseline), npm, and Go 1.26+. Then:
 
 ```sh
 make install
@@ -280,7 +280,7 @@ Piper chooses an image in this order:
 
 1. GitLab job or global/default `image`, when parsed.
 2. A supported GitHub setup-action image.
-3. `ubuntu:22.04`.
+3. `ubuntu:26.04`.
 
 GitHub runtime mappings:
 
